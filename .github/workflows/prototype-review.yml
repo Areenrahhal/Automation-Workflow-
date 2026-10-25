@@ -1,0 +1,267 @@
+name: Prototype review
+
+# Runs when Jira (or you, by hand) asks for a PRD review of one epic.
+# It reads the epic and its Confluence PRD, asks Claude for the user flows,
+# posts them as a Jira comment, and moves the epic to Prototype Approval.
+on:
+  repository_dispatch:
+    types: [prototype_review]
+  workflow_dispatch:
+    inputs:
+      issue_key:
+        description: "Jira epic key, for example MUID-7682"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prototype-review-${{ github.event.client_payload.issue_key || inputs.issue_key }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ISSUE_KEY: ${{ github.event.client_payload.issue_key || inputs.issue_key }}
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_MODEL: claude-sonnet-5-5
+      READY_STATUS: Ready for Prototype
+      SEND_TRANSITION: Send Prototype for Approval
+      APPROVAL_STATUS: Prototype Approval
+    steps:
+      - name: Review the PRD and post the user flows
+        run: |
+          python3 - <<'PY'
+          import base64
+          import html
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          MAX_PRD_CHARS = 60000
+          MAX_COMMENT_CHARS = 20000
+
+
+          def die(message):
+              print("ERROR: " + message)
+              sys.exit(1)
+
+
+          def call(method, url, headers, body=None):
+              data = json.dumps(body).encode("utf-8") if body is not None else None
+              request = urllib.request.Request(url, data=data, method=method, headers=headers)
+              try:
+                  with urllib.request.urlopen(request, timeout=120) as response:
+                      raw = response.read().decode("utf-8")
+              except urllib.error.HTTPError as error:
+                  detail = error.read().decode("utf-8", "replace")[:500]
+                  die(method + " " + url.split("?")[0] + " returned " + str(error.code) + ": " + detail)
+              except urllib.error.URLError as error:
+                  die(method + " " + url.split("?")[0] + " failed: " + str(error.reason))
+              return json.loads(raw) if raw else {}
+
+
+          BLOCK_TYPES = {"paragraph", "heading", "listItem", "tableRow", "codeBlock", "blockquote", "rule"}
+
+
+          def adf_text(node, links):
+              """Flatten Atlassian Document Format to plain text and collect link URLs."""
+              if isinstance(node, list):
+                  return "".join(adf_text(child, links) for child in node)
+              if not isinstance(node, dict):
+                  return ""
+              kind = node.get("type")
+              attrs = node.get("attrs") or {}
+              if kind in ("inlineCard", "blockCard", "embedCard") and attrs.get("url"):
+                  links.append(attrs["url"])
+                  return attrs["url"] + " "
+              if kind == "text":
+                  for mark in node.get("marks") or []:
+                      href = (mark.get("attrs") or {}).get("href")
+                      if mark.get("type") == "link" and href:
+                          links.append(href)
+                  return node.get("text", "")
+              if kind == "hardBreak":
+                  return "\n"
+              if kind == "mention":
+                  return attrs.get("text", "@someone")
+              if kind == "emoji":
+                  return attrs.get("text", "")
+              inner = adf_text(node.get("content") or [], links)
+              if kind in ("tableCell", "tableHeader"):
+                  return inner.strip() + " | "
+              if kind in BLOCK_TYPES:
+                  return inner + "\n"
+              return inner
+
+
+          def storage_text(markup):
+              """Turn Confluence storage-format markup into readable plain text."""
+              text = re.sub(r"</(td|th)>", " | ", markup)
+              text = re.sub(r"</(p|h[1-6]|li|tr|div)>|<br\s*/?>", "\n", text)
+              text = re.sub(r"<[^>]+>", "", text)
+              text = html.unescape(text)
+              text = re.sub(r"[ \t]+\n", "\n", text)
+              text = re.sub(r"\n{3,}", "\n\n", text)
+              return text.strip()
+
+
+          def page_id_from_link(url):
+              """Get a Confluence page id from a /pages/<id> link or a /wiki/x/<tiny> short link."""
+              match = re.search(r"/pages/(\d+)", url)
+              if match:
+                  return match.group(1)
+              match = re.search(r"/wiki/x/([A-Za-z0-9_-]+)", url)
+              if match:
+                  tiny = match.group(1)
+                  raw = base64.urlsafe_b64decode(tiny + "=" * (-len(tiny) % 4))
+                  return str(int.from_bytes(raw, "little"))
+              return None
+
+
+          def find_prd_link(description_text, links, base):
+              host = urllib.parse.urlparse(base).netloc
+              found = re.findall(r"https?://[^\s)>\]]+", description_text)
+              for url in links + found:
+                  parsed = urllib.parse.urlparse(url)
+                  if parsed.netloc == host and "/wiki/" in parsed.path and page_id_from_link(url):
+                      return url
+              return None
+
+
+          SYSTEM_PROMPT = (
+              "You are a senior product designer reviewing a product requirements document (PRD). "
+              "Reply with Jira wiki markup only. Do not use markdown, code fences or HTML."
+          )
+
+          TASK = """Review the PRD and summarize the user flows. Do not define screens, layouts or visual design.
+
+          Rules:
+          - Use only what the epic, the PRD and the comments say. Do not invent requirements.
+          - If something is unclear or missing, list it under Open questions.
+          - Later comments, such as answers to open questions or reviewer feedback on an earlier version, override the PRD.
+          - If an earlier review comment was sent back with feedback, add a short section called Changes since the last version that says how the feedback was handled.
+
+          Format (Jira wiki markup):
+          h2. PRD Review: User Flows
+          Then these sections, each as h3.: Goal and users; Main flow (numbered steps with #); Other flows (skip, abandon and resume, errors); Edge cases (bullets with *); Open questions (numbered); Assumptions (bullets).
+          Name analytics events from the PRD in {{double braces}} next to the step they belong to.
+          Keep it under 700 words."""
+
+
+          def main():
+              needed = ["ISSUE_KEY", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "ANTHROPIC_API_KEY"]
+              missing = [name for name in needed if not os.environ.get(name, "").strip()]
+              if missing:
+                  die("Missing settings: " + ", ".join(missing))
+
+              key = os.environ["ISSUE_KEY"].strip()
+              if not re.fullmatch(r"[A-Z][A-Z0-9_]*-[0-9]+", key):
+                  die("The issue key looks wrong: " + repr(key[:40]))
+
+              base = os.environ["JIRA_BASE_URL"].strip().rstrip("/")
+              model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
+              ready_status = os.environ.get("READY_STATUS", "Ready for Prototype")
+              send_transition = os.environ.get("SEND_TRANSITION", "Send Prototype for Approval")
+              approval_status = os.environ.get("APPROVAL_STATUS", "Prototype Approval")
+
+              login = os.environ["JIRA_EMAIL"].strip() + ":" + os.environ["JIRA_API_TOKEN"].strip()
+              auth = "Basic " + base64.b64encode(login.encode("utf-8")).decode("ascii")
+              jira_headers = {"Authorization": auth, "Accept": "application/json", "Content-Type": "application/json"}
+
+              def jira(method, path, body=None):
+                  return call(method, base + path, jira_headers, body)
+
+              issue = jira("GET", "/rest/api/3/issue/" + key + "?fields=summary,description,status")
+              fields = issue.get("fields", {})
+              status = (fields.get("status") or {}).get("name", "")
+              if status.lower() != ready_status.lower():
+                  print("Skipping " + key + ": status is '" + status + "', not '" + ready_status + "'.")
+                  return
+
+              links = []
+              description_text = adf_text(fields.get("description") or {}, links).strip()
+              summary = fields.get("summary", "")
+
+              prd_title, prd_text = "", ""
+              prd_link = find_prd_link(description_text, links, base)
+              if prd_link:
+                  page = jira("GET", "/wiki/api/v2/pages/" + page_id_from_link(prd_link) + "?body-format=storage")
+                  prd_title = page.get("title", "")
+                  prd_text = storage_text(((page.get("body") or {}).get("storage") or {}).get("value", ""))[:MAX_PRD_CHARS]
+                  print("Read PRD page: " + prd_title)
+              else:
+                  print("No Confluence PRD link found in the epic description.")
+
+              comment_data = jira("GET", "/rest/api/3/issue/" + key + "/comment?orderBy=created&maxResults=100")
+              comment_lines = []
+              for item in comment_data.get("comments", []):
+                  author = (item.get("author") or {}).get("displayName", "Someone")
+                  comment_lines.append(author + ": " + adf_text(item.get("body") or {}, []).strip())
+              comments = "\n\n".join(comment_lines)[-MAX_COMMENT_CHARS:]
+
+              prompt = "Jira epic " + key + ": " + summary + "\n\nEPIC DESCRIPTION:\n" + description_text + "\n\n"
+              if prd_text:
+                  prompt += 'PRD (Confluence page "' + prd_title + '"):\n' + prd_text + "\n\n"
+              else:
+                  prompt += "PRD: not found. Rely on the epic description only and say so under Assumptions.\n\n"
+              prompt += "COMMENTS (oldest first):\n" + (comments or "None") + "\n\n" + TASK
+
+              reply = call(
+                  "POST",
+                  "https://api.anthropic.com/v1/messages",
+                  {
+                      "x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
+                      "anthropic-version": "2023-06-01",
+                      "content-type": "application/json",
+                  },
+                  {"model": model, "max_tokens": 4000, "system": SYSTEM_PROMPT, "messages": [{"role": "user", "content": prompt}]},
+              )
+              review = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text").strip()
+              if not review:
+                  die("Claude returned no text.")
+
+              body = (
+                  "_Automated review by Claude. Draft for approval. Screens are not defined yet._\n\n"
+                  + review
+                  + "\n\n----\n_To continue, use *Prototype Approved*. To send it back, add your feedback as a comment, then use *Reject Prototype*._"
+              )
+              jira("POST", "/rest/api/2/issue/" + key + "/comment", {"body": body})
+              print("Posted the review comment on " + key + ".")
+
+              transitions = jira("GET", "/rest/api/3/issue/" + key + "/transitions").get("transitions", [])
+              match = [t for t in transitions if t.get("name", "").lower() == send_transition.lower()]
+              if not match:
+                  match = [t for t in transitions if (t.get("to") or {}).get("name", "").lower() == approval_status.lower()]
+              if not match:
+                  names = ", ".join(t.get("name", "?") for t in transitions) or "none"
+                  die("Could not find the '" + send_transition + "' transition. Available: " + names)
+              jira("POST", "/rest/api/3/issue/" + key + "/transitions", {"transition": {"id": match[0]["id"]}})
+              print("Moved " + key + " to " + approval_status + ".")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+      - name: Tell the epic if something went wrong
+        if: failure()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ "$ISSUE_KEY" =~ ^[A-Z][A-Z0-9_]*-[0-9]+$ ]]; then
+            curl -sS -o /dev/null -X POST \
+              -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"body\": \"The automated prototype review failed. Details: $RUN_URL\"}" \
+              "$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY/comment" || true
+          fi
