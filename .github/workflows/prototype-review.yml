@@ -1,8 +1,8 @@
 name: Prototype review
 
-# Runs when Jira (or you, by hand) asks for a PRD review of one epic.
-# It reads the epic and its Confluence PRD, asks Claude for the user flows,
-# posts them as a Jira comment, and moves the epic to Prototype Approval.
+# Runs when an epic enters Prototype Journeys. It reads the epic and its Confluence PRD,
+# asks Claude for the user flows, posts them as a Jira comment, and moves the epic
+# to Prototype Approval with the Journeys Done transition.
 on:
   repository_dispatch:
     types: [prototype_review]
@@ -30,8 +30,8 @@ jobs:
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CLAUDE_MODEL: claude-sonnet-5-5
-      READY_STATUS: Ready for Prototype
-      SEND_TRANSITION: Send Prototype for Approval
+      READY_STATUS: Prototype Journeys
+      SEND_TRANSITION: Journeys Done
       APPROVAL_STATUS: Prototype Approval
     steps:
       - name: Review the PRD and post the user flows
@@ -170,8 +170,8 @@ jobs:
 
               base = os.environ["JIRA_BASE_URL"].strip().rstrip("/")
               model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
-              ready_status = os.environ.get("READY_STATUS", "Ready for Prototype")
-              send_transition = os.environ.get("SEND_TRANSITION", "Send Prototype for Approval")
+              ready_status = os.environ.get("READY_STATUS", "Prototype Journeys")
+              send_transition = os.environ.get("SEND_TRANSITION", "Journeys Done")
               approval_status = os.environ.get("APPROVAL_STATUS", "Prototype Approval")
 
               login = os.environ["JIRA_EMAIL"].strip() + ":" + os.environ["JIRA_API_TOKEN"].strip()
@@ -233,7 +233,7 @@ jobs:
               body = (
                   "_Automated review by Claude. Draft for approval. Screens are not defined yet._\n\n"
                   + review
-                  + "\n\n----\n_To continue, use *Prototype Approved*. To send it back, add your feedback as a comment, then use *Reject Prototype*._"
+                  + "\n\n----\n_To continue, use *Journeys Approved*. To send it back, add your feedback as a comment, then use *Journeys Rejected*._"
               )
               jira("POST", "/rest/api/2/issue/" + key + "/comment", {"body": body})
               print("Posted the review comment on " + key + ".")
