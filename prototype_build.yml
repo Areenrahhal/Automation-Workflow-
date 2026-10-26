@@ -1,0 +1,422 @@
+name: Prototype build
+
+# Runs when an epic enters Prototyping (journeys approved, or a prototype was rejected).
+# It builds, or revises, a clickable HTML prototype from the approved review comment,
+# publishes it with GitHub Pages, posts the link on the epic, and moves the epic
+# to Prototype Done with the Waiting Approval transition.
+on:
+  repository_dispatch:
+    types: [prototype_build]
+  workflow_dispatch:
+    inputs:
+      issue_key:
+        description: "Jira epic key, for example MUID-7825"
+        required: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# One build at a time, so two epics never overwrite each other's files.
+concurrency:
+  group: prototype-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      ISSUE_KEY: ${{ github.event.client_payload.issue_key || inputs.issue_key }}
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_MODEL: claude-sonnet-5-5
+      BUILD_STATUS: Prototyping
+      DONE_TRANSITION: Waiting Approval
+      DONE_STATUS: Prototype Done
+    steps:
+      - name: Get the repository
+        uses: actions/checkout@v4
+
+      - name: Build the prototype with Claude
+        id: gen
+        run: |
+          python3 - <<'PY'
+          import base64
+          import html
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          MAX_PRD_CHARS = 60000
+          MAX_TEXT_CHARS = 30000
+          MAX_CURRENT_CHARS = 80000
+          SPEC_MARKER = "Automated review by Claude"
+          BUILD_MARKER = "Prototype ready"
+          FAILURE_MARKER = "The automated prototype"
+
+
+          def die(message):
+              print("ERROR: " + message)
+              sys.exit(1)
+
+
+          def call(method, url, headers, body=None, timeout=120):
+              data = json.dumps(body).encode("utf-8") if body is not None else None
+              request = urllib.request.Request(url, data=data, method=method, headers=headers)
+              try:
+                  with urllib.request.urlopen(request, timeout=timeout) as response:
+                      raw = response.read().decode("utf-8")
+              except urllib.error.HTTPError as error:
+                  detail = error.read().decode("utf-8", "replace")[:500]
+                  die(method + " " + url.split("?")[0] + " returned " + str(error.code) + ": " + detail)
+              except urllib.error.URLError as error:
+                  die(method + " " + url.split("?")[0] + " failed: " + str(error.reason))
+              return json.loads(raw) if raw else {}
+
+
+          BLOCK_TYPES = {"paragraph", "heading", "listItem", "tableRow", "codeBlock", "blockquote", "rule"}
+
+
+          def adf_text(node, links):
+              """Flatten Atlassian Document Format to plain text and collect link URLs."""
+              if isinstance(node, list):
+                  return "".join(adf_text(child, links) for child in node)
+              if not isinstance(node, dict):
+                  return ""
+              kind = node.get("type")
+              attrs = node.get("attrs") or {}
+              if kind in ("inlineCard", "blockCard", "embedCard") and attrs.get("url"):
+                  links.append(attrs["url"])
+                  return attrs["url"] + " "
+              if kind == "text":
+                  for mark in node.get("marks") or []:
+                      href = (mark.get("attrs") or {}).get("href")
+                      if mark.get("type") == "link" and href:
+                          links.append(href)
+                  return node.get("text", "")
+              if kind == "hardBreak":
+                  return "\n"
+              if kind == "mention":
+                  return attrs.get("text", "@someone")
+              if kind == "emoji":
+                  return attrs.get("text", "")
+              inner = adf_text(node.get("content") or [], links)
+              if kind in ("tableCell", "tableHeader"):
+                  return inner.strip() + " | "
+              if kind in BLOCK_TYPES:
+                  return inner + "\n"
+              return inner
+
+
+          def storage_text(markup):
+              """Turn Confluence storage-format markup into readable plain text."""
+              text = re.sub(r"</(td|th)>", " | ", markup)
+              text = re.sub(r"</(p|h[1-6]|li|tr|div)>|<br\s*/?>", "\n", text)
+              text = re.sub(r"<[^>]+>", "", text)
+              text = html.unescape(text)
+              text = re.sub(r"[ \t]+\n", "\n", text)
+              text = re.sub(r"\n{3,}", "\n\n", text)
+              return text.strip()
+
+
+          def page_id_from_link(url):
+              """Get a Confluence page id from a /pages/<id> link or a /wiki/x/<tiny> short link."""
+              match = re.search(r"/pages/(\d+)", url)
+              if match:
+                  return match.group(1)
+              match = re.search(r"/wiki/x/([A-Za-z0-9_-]+)", url)
+              if match:
+                  tiny = match.group(1)
+                  raw = base64.urlsafe_b64decode(tiny + "=" * (-len(tiny) % 4))
+                  return str(int.from_bytes(raw, "little"))
+              return None
+
+
+          def find_prd_link(description_text, links, base):
+              host = urllib.parse.urlparse(base).netloc
+              found = re.findall(r"https?://[^\s)>\]]+", description_text)
+              for url in links + found:
+                  parsed = urllib.parse.urlparse(url)
+                  if parsed.netloc == host and "/wiki/" in parsed.path and page_id_from_link(url):
+                      return url
+              return None
+
+
+          def write_output(name, value):
+              path = os.environ.get("GITHUB_OUTPUT")
+              if path:
+                  with open(path, "a", encoding="utf-8") as handle:
+                      handle.write(name + "=" + value + "\n")
+
+
+          SYSTEM_PROMPT = (
+              "You are a front-end prototyper. You turn approved user flows into a clickable HTML prototype. "
+              "Reply with one complete HTML document and nothing else: no explanation and no code fences."
+          )
+
+          TASK = """Build a clickable prototype of the approved user flows as ONE self-contained HTML file.
+
+          Source of truth: the APPROVED SPEC. Reviewer notes that come after it override the spec. If there is no approved spec, build from the epic description. The PRD is background only.
+          If a CURRENT PROTOTYPE is given, this is a revision: apply the reviewer notes to it and keep everything else the same.
+
+          Requirements:
+          - A single HTML document with inline CSS and JavaScript. No external libraries, fonts, images or network requests.
+          - Implement every flow, step and edge case in the spec so a person can click through it. Use realistic sample data and clear labels.
+          - Where the spec is silent, pick a sensible default and list it in a short "Assumptions" section at the bottom of the page. Do not add features the spec does not call for.
+          - No real authentication or backend. If credentials are needed, accept a demo value and show it on the page.
+          - Responsive from 360px wide, with a visible keyboard focus. Support light and dark mode with prefers-color-scheme.
+          - Show the epic key and the word "Prototype" in a small header or footer.
+          - Put a descriptive <title> in the head.
+
+          Reply with the HTML document only, starting with <!doctype html>."""
+
+
+          def main():
+              needed = ["ISSUE_KEY", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "ANTHROPIC_API_KEY"]
+              missing = [name for name in needed if not os.environ.get(name, "").strip()]
+              if missing:
+                  die("Missing settings: " + ", ".join(missing))
+
+              key = os.environ["ISSUE_KEY"].strip()
+              if not re.fullmatch(r"[A-Z][A-Z0-9_]*-[0-9]+", key):
+                  die("The issue key looks wrong: " + repr(key[:40]))
+
+              base = os.environ["JIRA_BASE_URL"].strip().rstrip("/")
+              model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
+              build_status = os.environ.get("BUILD_STATUS", "Prototyping")
+
+              login = os.environ["JIRA_EMAIL"].strip() + ":" + os.environ["JIRA_API_TOKEN"].strip()
+              auth = "Basic " + base64.b64encode(login.encode("utf-8")).decode("ascii")
+              jira_headers = {"Authorization": auth, "Accept": "application/json", "Content-Type": "application/json"}
+
+              def jira(method, path, body=None):
+                  return call(method, base + path, jira_headers, body)
+
+              issue = jira("GET", "/rest/api/3/issue/" + key + "?fields=summary,description,status")
+              fields = issue.get("fields", {})
+              status = (fields.get("status") or {}).get("name", "")
+              if status.lower() != build_status.lower():
+                  print("Skipping " + key + ": status is '" + status + "', not '" + build_status + "'.")
+                  write_output("build", "false")
+                  return
+
+              links = []
+              description_text = adf_text(fields.get("description") or {}, links).strip()
+              summary = fields.get("summary", "")
+
+              prd_title, prd_text = "", ""
+              prd_link = find_prd_link(description_text, links, base)
+              if prd_link:
+                  page = jira("GET", "/wiki/api/v2/pages/" + page_id_from_link(prd_link) + "?body-format=storage")
+                  prd_title = page.get("title", "")
+                  prd_text = storage_text(((page.get("body") or {}).get("storage") or {}).get("value", ""))[:MAX_PRD_CHARS]
+                  print("Read PRD page: " + prd_title)
+              else:
+                  print("No Confluence PRD link found in the epic description.")
+
+              comment_data = jira("GET", "/rest/api/3/issue/" + key + "/comment?orderBy=created&maxResults=100")
+              comments = []
+              for item in comment_data.get("comments", []):
+                  author = (item.get("author") or {}).get("displayName", "Someone")
+                  comments.append((author, adf_text(item.get("body") or {}, []).strip()))
+
+              spec_index = None
+              build_index = None
+              for index, (_, text) in enumerate(comments):
+                  if text.startswith(SPEC_MARKER):
+                      spec_index = index
+                  if text.startswith(BUILD_MARKER):
+                      build_index = index
+
+              folder = os.path.join("prototypes", key)
+              current_path = os.path.join(folder, "index.html")
+              current = ""
+              if os.path.exists(current_path):
+                  with open(current_path, encoding="utf-8") as handle:
+                      current = handle.read()[:MAX_CURRENT_CHARS]
+
+              if spec_index is None:
+                  print("No approved review comment found. Building from the epic description.")
+                  spec = ""
+                  notes = comments
+              else:
+                  spec = comments[spec_index][1].split("To continue, use")[0].strip()[:MAX_TEXT_CHARS]
+                  notes = comments[spec_index + 1:]
+              if current and build_index is not None and (spec_index is None or build_index > spec_index):
+                  print("An earlier prototype exists. Revising it with the feedback given since the last build.")
+                  notes = comments[build_index + 1:]
+              else:
+                  current = ""
+              notes = [(a, t) for a, t in notes if not t.startswith((SPEC_MARKER, BUILD_MARKER, FAILURE_MARKER))]
+              notes_text = "\n\n".join(author + ": " + text for author, text in notes)[-MAX_TEXT_CHARS:]
+
+              prompt = "Jira epic " + key + ": " + summary + "\n\n"
+              prompt += "APPROVED SPEC (the review comment):\n" + (spec or "None") + "\n\n"
+              prompt += "REVIEWER NOTES (oldest first):\n" + (notes_text or "None") + "\n\n"
+              if current:
+                  prompt += "CURRENT PROTOTYPE (the last published version):\n" + current + "\n\n"
+              prompt += "EPIC DESCRIPTION:\n" + description_text + "\n\n"
+              if prd_text:
+                  prompt += 'PRD (Confluence page "' + prd_title + '"), background only:\n' + prd_text + "\n\n"
+              prompt += TASK
+
+              reply = call(
+                  "POST",
+                  "https://api.anthropic.com/v1/messages",
+                  {
+                      "x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
+                      "anthropic-version": "2023-06-01",
+                      "content-type": "application/json",
+                  },
+                  {"model": model, "max_tokens": 16000, "system": SYSTEM_PROMPT, "messages": [{"role": "user", "content": prompt}]},
+                  timeout=600,
+              )
+              if reply.get("stop_reason") == "max_tokens":
+                  die("Claude's answer was cut off before the page was finished. Run the build again.")
+              page_html = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text").strip()
+              page_html = re.sub(r"^```(?:html)?\s*", "", page_html)
+              page_html = re.sub(r"\s*```$", "", page_html).strip()
+              if not re.match(r"(?is)<!doctype html", page_html) or "</html>" not in page_html.lower():
+                  die("Claude did not return a complete HTML page.")
+
+              if re.search(r"(?i)<head[^>]*>", page_html):
+                  page_html = re.sub(r"(?i)(<head[^>]*>)", r'\1\n<meta name="robots" content="noindex">', page_html, count=1)
+
+              os.makedirs(folder, exist_ok=True)
+              with open(os.path.join(folder, "index.html"), "w", encoding="utf-8") as handle:
+                  handle.write(page_html + "\n")
+              print("Wrote " + folder + "/index.html (" + str(len(page_html)) + " characters).")
+              write_output("build", "true")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+      - name: Save the prototype in the repository
+        if: steps.gen.outputs.build == 'true'
+        run: |
+          git config user.name "prototype-bot"
+          git config user.email "prototype-bot@users.noreply.github.com"
+          git add prototypes
+          git commit -m "Add prototype for $ISSUE_KEY" || echo "Nothing new to save."
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+
+      - name: Package the site
+        if: steps.gen.outputs.build == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: prototypes
+
+      - name: Publish with GitHub Pages
+        if: steps.gen.outputs.build == 'true'
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Post the link in Jira
+        if: steps.gen.outputs.build == 'true'
+        env:
+          PROTOTYPE_URL: ${{ steps.deployment.outputs.page_url }}${{ env.ISSUE_KEY }}/
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.request
+
+
+          def die(message):
+              print("ERROR: " + message)
+              sys.exit(1)
+
+
+          def call(method, url, headers, body=None):
+              data = json.dumps(body).encode("utf-8") if body is not None else None
+              request = urllib.request.Request(url, data=data, method=method, headers=headers)
+              try:
+                  with urllib.request.urlopen(request, timeout=120) as response:
+                      raw = response.read().decode("utf-8")
+              except urllib.error.HTTPError as error:
+                  detail = error.read().decode("utf-8", "replace")[:500]
+                  die(method + " " + url.split("?")[0] + " returned " + str(error.code) + ": " + detail)
+              except urllib.error.URLError as error:
+                  die(method + " " + url.split("?")[0] + " failed: " + str(error.reason))
+              return json.loads(raw) if raw else {}
+
+
+          def main():
+              key = os.environ.get("ISSUE_KEY", "").strip()
+              if not re.fullmatch(r"[A-Z][A-Z0-9_]*-[0-9]+", key):
+                  die("The issue key looks wrong: " + repr(key[:40]))
+              link = os.environ.get("PROTOTYPE_URL", "").strip()
+              if not link.startswith("https://"):
+                  die("The prototype link looks wrong: " + repr(link[:80]))
+
+              base = os.environ["JIRA_BASE_URL"].strip().rstrip("/")
+              login = os.environ["JIRA_EMAIL"].strip() + ":" + os.environ["JIRA_API_TOKEN"].strip()
+              headers = {
+                  "Authorization": "Basic " + base64.b64encode(login.encode("utf-8")).decode("ascii"),
+                  "Accept": "application/json",
+                  "Content-Type": "application/json",
+              }
+
+              issue = call("GET", base + "/rest/api/3/issue/" + key + "?fields=reporter", headers)
+              reporter = ((issue.get("fields") or {}).get("reporter") or {}).get("accountId")
+              greeting = "[~accountid:" + reporter + "] " if reporter else ""
+
+              body = (
+                  "h2. Prototype ready\n\n"
+                  + greeting
+                  + "the prototype for " + key + " is ready.\n\n"
+                  + "*Link:* " + link + "\n\n"
+                  + "_Built by Claude from the approved user-flow comment. It is a clickable demo with sample data, not connected to a backend. "
+                  + "Anyone with the link can open it._\n\n----\n"
+                  + "_To approve, use *Approved*. To ask for changes, add your feedback as a comment, then use *Reject Prototype*._"
+              )
+              call("POST", base + "/rest/api/2/issue/" + key + "/comment", headers, {"body": body})
+              print("Posted the prototype link on " + key + ".")
+
+              done_transition = os.environ.get("DONE_TRANSITION", "Waiting Approval")
+              done_status = os.environ.get("DONE_STATUS", "Prototype Done")
+              transitions = call("GET", base + "/rest/api/3/issue/" + key + "/transitions", headers).get("transitions", [])
+              match = [t for t in transitions if t.get("name", "").lower() == done_transition.lower()]
+              if not match:
+                  match = [t for t in transitions if (t.get("to") or {}).get("name", "").lower() == done_status.lower()]
+              if not match:
+                  names = ", ".join(t.get("name", "?") for t in transitions) or "none"
+                  die("Could not find the '" + done_transition + "' transition. Available: " + names)
+              call("POST", base + "/rest/api/3/issue/" + key + "/transitions", headers, {"transition": {"id": match[0]["id"]}})
+              print("Moved " + key + " to " + done_status + ".")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+      - name: Tell the epic if something went wrong
+        if: failure()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ "$ISSUE_KEY" =~ ^[A-Z][A-Z0-9_]*-[0-9]+$ ]]; then
+            curl -sS -o /dev/null -X POST \
+              -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"body\": \"The automated prototype build failed. Details: $RUN_URL\"}" \
+              "$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY/comment" || true
+          fi
