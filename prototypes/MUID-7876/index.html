@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MUID-7876 Prototype: New-user activation onboarding</title>
+<style>
+:root{
+  --bg:#f5f6fa;--surface:#fff;--text:#1c2030;--muted:#5a6177;--border:#d9dce6;
+  --primary:#3b4fd8;--primary-text:#fff;--accent-bg:#eef0ff;--ok:#12805c;--ok-bg:#e3f6ee;
+  --warn-bg:#fff4dc;--warn:#8a5a00;--err:#b3261e;--shadow:0 2px 10px rgba(20,25,50,.08);
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#12141c;--surface:#1b1f2b;--text:#eceef6;--muted:#a0a7bd;--border:#333950;
+  --primary:#8c9bff;--primary-text:#12141c;--accent-bg:#252b4a;--ok:#5fd6a6;--ok-bg:#16332a;
+  --warn-bg:#3a2e12;--warn:#ffd27a;--err:#ff8a80;--shadow:none}
+}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text)}
+header.top{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:space-between;padding:.6rem 1rem;background:var(--surface);border-bottom:1px solid var(--border)}
+.brand{font-weight:700}
+.badge{display:inline-block;font-size:.75rem;padding:.1rem .5rem;border-radius:99px;background:var(--accent-bg);color:var(--primary);border:1px solid var(--border);margin-left:.4rem;font-weight:600}
+main{max-width:720px;margin:0 auto;padding:1rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem;box-shadow:var(--shadow);margin-bottom:1rem}
+h1{font-size:1.5rem;line-height:1.25;margin:.25rem 0 .5rem}
+h2{font-size:1.1rem;margin:0 0 .5rem}
+p{margin:.25rem 0 .75rem}
+.muted{color:var(--muted)}
+.steps{font-size:.8rem;color:var(--muted);margin-bottom:.25rem}
+.steps b{color:var(--primary)}
+button,.btn{font:inherit;cursor:pointer;border-radius:8px;padding:.55rem 1rem;border:1px solid var(--border);background:var(--surface);color:var(--text);min-height:44px}
+button.primary{background:var(--primary);color:var(--primary-text);border-color:var(--primary);font-weight:600}
+button.link{border:0;background:none;color:var(--primary);text-decoration:underline;padding:.4rem .5rem;min-height:36px}
+button:disabled{opacity:.55;cursor:not-allowed}
+:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+h1:focus{outline:none}
+label,legend{font-weight:600;display:block;margin:.5rem 0 .25rem}
+input[type=text],input[type=email],input[type=password],select{font:inherit;width:100%;padding:.55rem .7rem;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);min-height:44px}
+fieldset{border:0;padding:0;margin:0 0 .75rem}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem}
+.opt{position:relative}
+.opt input{position:absolute;opacity:0;inset:0;cursor:pointer;margin:0}
+.opt span{display:block;padding:.65rem .75rem;border:1px solid var(--border);border-radius:10px;background:var(--bg);font-weight:500}
+.opt input:checked+span{border-color:var(--primary);background:var(--accent-bg);box-shadow:inset 0 0 0 1px var(--primary)}
+.opt input:focus-visible+span{outline:3px solid var(--primary);outline-offset:2px}
+.row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-top:.75rem}
+.err{color:var(--err);font-size:.9rem;min-height:1.2em;margin:.25rem 0}
+.bar{height:10px;background:var(--border);border-radius:99px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--ok);transition:width .3s}
+ul.list{list-style:none;margin:0;padding:0}
+.item{display:flex;gap:.75rem;align-items:flex-start;padding:.8rem;border:1px solid var(--border);border-radius:10px;margin-top:.6rem;background:var(--bg)}
+.item.rec{border-color:var(--primary);background:var(--accent-bg)}
+.item.done{opacity:.85}
+.check{flex:none;width:26px;height:26px;border-radius:50%;border:2px solid var(--border);display:grid;place-items:center;font-size:.9rem;font-weight:700}
+.done .check{background:var(--ok);border-color:var(--ok);color:#fff}
+.skipped .check{border-style:dashed}
+.item .body{flex:1;min-width:0}
+.item .t{font-weight:600}
+.tag{font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;padding:.05rem .4rem;border-radius:4px;margin-left:.3rem;border:1px solid var(--border);color:var(--muted)}
+.tag.req{color:var(--primary);border-color:var(--primary)}
+.banner{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:.75rem 1rem;margin:.75rem 0}
+.info{background:var(--accent-bg);border-radius:10px;padding:.75rem 1rem;margin:.75rem 0}
+.tip{background:var(--text);color:var(--bg);border-radius:10px;padding:.7rem .9rem;margin:.5rem 0;font-size:.92rem;display:flex;gap:.75rem;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.tip button{min-height:36px;padding:.25rem .75rem}
+.celebrate{text-align:center}
+.celebrate .big{font-size:3rem}
+details.tools{margin-top:1rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.75rem 1rem}
+details summary{cursor:pointer;font-weight:600}
+#log{font:.8rem/1.4 ui-monospace,Menlo,Consolas,monospace;max-height:200px;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.5rem;margin:.5rem 0 0;list-style:none}
+#log li{padding:.1rem 0}
+#toast{position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:.6rem 1rem;border-radius:8px;max-width:90vw;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}
+footer{max-width:720px;margin:0 auto;padding:0 1rem 2rem;font-size:.9rem}
+footer ul{padding-left:1.2rem}
+.sr{position:absolute;left:-9999px}
+.funnel{display:flex;flex-wrap:wrap;gap:.3rem;font-size:.75rem;margin:.5rem 0}
+.funnel span{padding:.1rem .5rem;border-radius:99px;border:1px solid var(--border);color:var(--muted)}
+.funnel span.on{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+</style>
+</head>
+<body>
+<header class="top">
+  <div><span class="brand">Flowdesk</span><span class="badge">Prototype</span><span class="badge">MUID-7876</span></div>
+  <div id="topactions"></div>
+</header>
+<main>
+  <div id="app" aria-live="polite"></div>
+  <details class="tools" id="tools">
+    <summary>Prototype tools (demo only)</summary>
+    <div class="row">
+      <button type="button" data-a="restart">Restart as new user</button>
+      <button type="button" data-a="restartExisting">Restart: user with existing project</button>
+      <button type="button" data-a="leave">Simulate leaving &amp; returning</button>
+    </div>
+    <p class="muted" style="margin-top:.75rem">Analytics events (FR-09), newest last:</p>
+    <div class="funnel" id="funnel" aria-label="Primary funnel"></div>
+    <ol id="log"></ol>
+  </details>
+</main>
+<footer>
+  <section class="card" aria-labelledby="ass">
+    <h2 id="ass">Assumptions</h2>
+    <ul>
+      <li>Demo sign-up accepts any values; defaults shown on the form are <code>alex@example.com</code> / <code>demo1234</code>. There is no real authentication or backend.</li>
+      <li>The checklist has 3 items: Create first project (required), Add first task (required), Connect a tool (optional, simulated). The spec leaves the other checklist tasks open.</li>
+      <li>Teammate invitation is not in this prototype because it is an open question.</li>
+      <li>Team administrators follow the same path as other roles; only the copy changes. A separate admin path is not defined.</li>
+      <li>"Unusual" role or goal means choosing "Other"; it gets a generic default checklist and sample names.</li>
+      <li>For a user with an existing project, the project item is pre-completed and adding a task to that project counts as activation.</li>
+      <li>The checklist stays visible after activation, in a completed state. Remaining optional items show as dismissed.</li>
+      <li>Abandonment is simulated with a button, and a reload mid-onboarding also shows the resume prompt. Progress is saved in this browser's local storage, or in memory if storage is blocked.</li>
+      <li>Error flows are not defined. Only basic empty-field validation is shown.</li>
+      <li>"Preferred way of working" has no event of its own, so it is recorded as detail on <code>goal_selected</code>.</li>
+      <li>"Skip optional steps" (top right) marks the optional Connect step as skipped. Required steps are never hidden.</li>
+      <li>Tooltips for the first project and first task are shown once and not repeated.</li>
+    </ul>
+  </section>
+  <p class="muted">MUID-7876 · Prototype · sample data only</p>
+</footer>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+(function(){
+var KEY='muid7876-proto', mem=null;
+function store(v){try{if(v===undefined)return localStorage.getItem(KEY);if(v===null)localStorage.removeItem(KEY);else localStorage.setItem(KEY,v)}catch(e){if(v===undefined)return mem;mem=v}}
+function fresh(existing){return{screen:'signup',last:'signup',name:'Alex',role:'',goal:'',way:'',projectName:existing?'Website relaunch':'',existing:!!existing,
+  done:{project:!!existing,task:false,connect:false},skipped:false,activated:false,tasks:[],tips:{project:false,task:false},flags:{},events:[]}}
+var S=null;
+try{var raw=store();if(raw)S=JSON.parse(raw)}catch(e){}
+if(!S)S=fresh(false);
+var app=document.getElementById('app');
+var ROLES=['Designer','Developer','Marketer','Team administrator','Other'];
+var GOALS={launch:'Plan a launch',own:'Track my own work',team:'Coordinate a team',other:'Other'};
+var WAYS={solo:'Mostly solo',team:'With a team',mix:'A mix of both'};
+var COPY={
+ launch:{title:"Let's get your launch organized",first:'Create your launch project',proj:'Spring product launch',task:'Draft launch announcement'},
+ own:{title:"Let's set up your personal workspace",first:'Create your first personal project',proj:'My weekly priorities',task:'Plan Monday'},
+ team:{title:"Let's get your team aligned",first:'Create a shared team project',proj:'Team sprint board',task:'Assign kickoff owners'},
+ other:{title:"Let's get you to your first win",first:'Create your first project',proj:'My first project',task:'My first task'}
+};
+function copy(){return COPY[S.goal]||COPY.other}
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function save(){store(JSON.stringify(S))}
+function log(name,detail){S.events.push({n:name,d:detail||''});save();renderTools()}
+function once(flag,name,detail){if(!S.flags[flag]){S.flags[flag]=1;log(name,detail)}else save()}
+function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.h);toast.h=setTimeout(function(){t.classList.remove('show')},3200)}
+function doneCount(){return (S.done.project?1:0)+(S.done.task?1:0)+(S.done.connect?1:0)}
+
+function go(screen){
+  S.screen=screen;if(screen!=='resume')S.last=screen;
+  if(screen==='checklist')log('checklist_viewed',(S.goal||'default')+' / '+(S.role||'no role'));
+  if(screen==='project')once('pcs','project_creation_started');
+  if(screen==='task')once('tcs','task_creation_started');
+  save();render();
+}
+function renderTop(){
+  var el=document.getElementById('topActions');
+  var show=['welcome','personalize','checklist','project','task'].indexOf(S.screen)>-1;
+  el.innerHTML=show?'<button type="button" class="link" data-a="skipOptional">Skip optional steps</button>':'';
+}
+function stepper(n){
+  var names=['Welcome','Questions','Checklist','Project','Task'];
+  return '<div class="steps" aria-label="Step '+n+' of 5">'+names.map(function(x,i){return i+1===n?'<b>'+x+'</b>':x}).join(' › ')+'</div>';
+}
+function tip(kind,text){
+  if(S.tips[kind])return '';
+  S.tips[kind]=true;save();
+  return '<div class="tip" role="note"><span>💡 '+text+'</span><button type="button" data-a="closeTip">Got it</button></div>';
+}
+function render(){
+  var h='';var sc=S.screen;
+  if(sc==='signup'){
+    h='<section class="card"><h1 tabindex="-1">Create your Flowdesk account</h1><p class="muted">Demo only: any values work. Defaults are filled in.</p>'+
+    '<form data-f="signup" novalidate><label for="nm">Name</label><input type="text" id="nm" value="Alex" autocomplete="off">'+
+    '<label for="em">Email</label><input type="email" id="em" value="alex@example.com" autocomplete="off">'+
+    '<label for="pw">Password</label><input type="password" id="pw" value="demo1234" autocomplete="off">'+
+    '<div class="row"><button class="primary" type="submit">Sign up</button></div></form></section>';
+  }
+  else if(sc==='welcome'){
+    h='<section class="card">'+stepper(1)+'<h1 tabindex="-1">Welcome, '+esc(S.name)+'. Go from idea to done, faster.</h1>'+
+    '<p>Flowdesk turns your work into projects and tasks you can finish. Setup takes about two minutes.</p>'+
+    '<form data-f="welcome" novalidate><fieldset><legend>What best describes your role?</legend><div class="opts">'+
+    ROLES.map(function(r){return '<label class="opt"><input type="radio" name="role" value="'+r+'"'+(S.role===r?' checked':'')+'><span>'+r+'</span></label>'}).join('')+
+    '</div></fieldset><div class="err" id="e1" role="alert"></div><div class="row"><button class="primary" type="submit">Get started</button></div></form></section>';
+  }
+  else if(sc==='personalize'){
+    h='<section class="card">'+stepper(2)+'<h1 tabindex="-1">A few quick questions</h1><p class="muted">Three short answers tailor your checklist.</p>'+
+    '<form data-f="personalize" novalidate><label for="rl">Your role</label><select id="rl">'+ROLES.map(function(r){return '<option'+(S.role===r?' selected':'')+'>'+r+'</option>'}).join('')+'</select>'+
+    '<fieldset style="margin-top:.75rem"><legend>Primary goal</legend><div class="opts">'+
+    Object.keys(GOALS).map(function(k){return '<label class="opt"><input type="radio" name="goal" value="'+k+'"'+(S.goal===k?' checked':'')+'><span>'+GOALS[k]+'</span></label>'}).join('')+
+    '</div></fieldset><fieldset><legend>Preferred way of working</legend><div class="opts">'+
+    Object.keys(WAYS).map(function(k){return '<label class="opt"><input type="radio" name="way" value="'+k+'"'+(S.way===k?' checked':'')+'><span>'+WAYS[k]+'</span></label>'}).join('')+
+    '</div></fieldset><div class="err" id="e2" role="alert"></div>'+
+    '<div class="row"><button class="primary" type="submit">Show my checklist</button><button type="button" class="link" data-a="skipQuestions">Skip questions, use defaults</button></div></form></section>';
+  }
+  else if(sc==='checklist'){h=checklistHtml()}
+  else if(sc==='project'){
+    h='<section class="card">'+stepper(4)+'<h1 tabindex="-1">Create your first project</h1><p class="muted">A project holds the tasks for one piece of work.</p>'+
+    tip('project','Name your project after the outcome you want, like a launch or a weekly plan.')+
+    '<form data-f="project" novalidate><label for="pn">Project name</label><input type="text" id="pn" value="'+esc(copy().proj)+'" maxlength="60">'+
+    '<div class="err" id="e3" role="alert"></div><div class="row"><button class="primary" type="submit">Create project</button><button type="button" class="link" data-a="toChecklist">Back to checklist</button></div></form>'+
+    '<p class="muted">This is a required step.</p></section>';
+  }
+  else if(sc==='task'){
+    h='<section class="card">'+stepper(5)+'<h1 tabindex="-1">Add your first task</h1><p class="muted">Project: <b>'+esc(S.projectName)+'</b></p>'+
+    tip('task','Keep it small and concrete. You can add more tasks later.')+
+    '<form data-f="task" novalidate><label for="tn">Task title</label><input type="text" id="tn" value="'+esc(copy().task)+'" maxlength="80">'+
+    '<div class="err" id="e4" role="alert"></div><div class="row"><button class="primary" type="submit">Add task</button><button type="button" class="link" data-a="toChecklist">Back to checklist</button></div></form>'+
+    '<p class="muted">This is a required step.</p></section>';
+  }
+  else if(sc==='success'){
+    var dismissed=!S.done.connect;
+    h='<section class="card celebrate"><div class="big" aria-hidden="true">🎉</div><h1 tabindex="-1">You\'re activated!</h1>'+
+    '<p>Project <b>'+esc(S.projectName)+'</b> now has '+S.tasks.length+' task'+(S.tasks.length>1?'s':'')+': <b>'+esc(S.tasks[S.tasks.length-1]||'')+'</b>.</p>'+
+    (dismissed?'<p class="muted">Remaining optional guidance has been dismissed so you can get on with your work.</p>':'')+'</section>'+
+    '<section class="card"><h2>Your checklist</h2>'+listHtml(true)+
+    '<div class="row"><button type="button" data-a="restart">Restart prototype</button></div></section>';
+  }
+  else if(sc==='resume'){
+    h='<section class="card"><h1 tabindex="-1">Welcome back, '+esc(S.name)+'</h1><p>You haven\'t finished setting up. Your progress was saved: <b>'+doneCount()+' of 3</b> checklist items done.</p>'+
+    '<div class="bar" aria-hidden="true"><i style="width:'+Math.round(doneCount()/3*100)+'%"></i></div>'+
+    '<div class="row"><button class="primary" type="button" data-a="resume">Resume onboarding</button></div></section>';
+  }
+  app.innerHTML=h;renderTop();renderTools();
+  var f=app.querySelector('h1');if(f)f.focus({preventScroll:false});
+}
+function listHtml(after){
+  var c=copy();
+  var items=[
+   {k:'project',t:S.existing?'Create first project':c.first,req:true,d:S.existing?'Using your existing project "'+esc(S.projectName)+'", so no duplicate setup.':'Required. Takes under a minute.'},
+   {k:'task',t:'Add first task',req:true,d:'Required. Add one task to your project.'},
+   {k:'connect',t:'Connect a tool (simulated)',req:false,d:'Optional. Link a tool like Slack. Demo only.'}
+  ];
+  var rec=null;
+  items.forEach(function(i){if(!rec&&i.req&&!S.done[i.k])rec=i.k});
+  return '<ul class="list">'+items.map(function(i){
+    var done=S.done[i.k],skipped=!i.req&&!done&&S.skipped;
+    var cls='item'+(done?' done':'')+(skipped?' skipped':'')+(rec===i.k&&!after?' rec':'');
+    var status=done?'Completed':skipped?(after?'Dismissed':'Skipped'):'';
+    var act='';
+    if(!after&&!done){
+      if(i.k==='project')act='<button class="primary" type="button" data-a="openProject">'+(S.existing?'Review':'Start')+'</button>';
+      if(i.k==='task')act=S.done.project?'<button class="'+(rec==='task'?'primary':'')+'" type="button" data-a="openTask">Start</button>':'<span class="muted">Create a project first</span>';
+      if(i.k==='connect'&&!skipped)act='<button type="button" data-a="connect">Connect</button> <button type="button" class="link" data-a="skipConnect">Skip</button>';
+    }
+    return '<li class="'+cls+'"><span class="check" aria-hidden="true">'+(done?'✓':'')+'</span><div class="body"><div class="t">'+i.t+
+      '<span class="tag'+(i.req?' req':'')+'">'+(i.req?'Required':'Optional')+'</span>'+(rec===i.k&&!after?'<span class="tag req">Recommended</span>':'')+'</div>'+
+      '<div class="muted">'+i.d+(status?' <b>'+status+'.</b>':'')+'</div>'+(act?'<div class="row" style="margin-top:.4rem">'+act+'</div>':'')+'</div></li>';
+  }).join('')+'</ul>';
+}
+function checklistHtml(){
+  var c=copy(),n=doneCount(),pct=Math.round(n/3*100);
+  var tailor=[S.role||'Role not set',GOALS[S.goal]||'Default path',WAYS[S.way]||'Mix'].join(' · ');
+  var h='<section class="card">'+stepper(3)+'<h1 tabindex="-1">'+c.title+'</h1><p class="muted">Tailored for: '+esc(tailor)+'</p>';
+  if(S.role==='Team administrator')h+='<p class="muted">As a workspace admin, you can set up your own first project now.</p>';
+  if(S.existing)h+='<div class="info">We found your project <b>'+esc(S.projectName)+'</b> from a previous session, so we adapted your checklist.</div>';
+  if(S.done.project&&!S.done.task&&!S.existing)h+='<div class="banner" role="note">Your project <b>'+esc(S.projectName)+'</b> is ready. Add your first task to finish setup. <button type="button" class="primary" data-a="openTask" style="margin-left:.5rem">Add first task</button></div>';
+  h+='<div class="row" style="margin:.5rem 0"><b>'+n+' of 3 done</b></div><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+pct+'" aria-label="Checklist progress"><i style="width:'+pct+'%"></i></div>';
+  h+=listHtml(false)+'</section>';
+  return h;
+}
+function renderTools(){
+  var l=document.getElementById('log');if(!l)return;
+  l.innerHTML=S.events.length?S.events.map(function(e,i){return '<li>'+(i+1)+'. <b>'+e.n+'</b>'+(e.d?' <span class="muted">('+esc(e.d)+')</span>':'')+'</li>'}).join(''):'<li class="muted">No events yet.</li>';
+  l.scrollTop=l.scrollHeight;
+  var names=S.events.map(function(e){return e.n});
+  var steps=[['Signup','onboarding_started'],['Onboarding started','onboarding_started'],['Project created','project_created'],['Task created','task_created'],['Activated','activation_completed']];
+  document.getElementById('funnel').innerHTML=steps.map(function(s){
+    var on=names.indexOf(s[1])>-1;
+    if(s[0]==='Project created'&&S.existing&&S.done.project)on=true;
+    return '<span class="'+(on?'on':'')+'">'+s[0]+'</span>'}).join('');
+}
+
+document.addEventListener('click',function(ev){
+  var b=ev.target.closest('[data-a]');if(!b)return;
+  var a=b.getAttribute('data-a');
+  if(a==='restart'){S=fresh(false);save();render();toast('Prototype restarted as a new user.')}
+  else if(a==='restartExisting'){S=fresh(true);save();render();toast('Restarted: this user has an existing project from a prior session.')}
+  else if(a==='leave'){
+    if(S.screen==='signup'||S.activated){toast('Leaving only applies mid-onboarding. Sign up first, and do not finish activation.');return}
+    log('onboarding_abandoned','left on '+S.last);go('resume');
+  }
+  else if(a==='resume'){log('returning_user_resumed_onboarding');go('checklist')}
+  else if(a==='closeTip'){var t=b.closest('.tip');if(t)t.remove()}
+  else if(a==='toChecklist'){go('checklist')}
+  else if(a==='openProject'){S.existing?go('task'):go('project')}
+  else if(a==='openTask'){go('task')}
+  else if(a==='connect'){S.done.connect=true;save();log('task_completed','connect_tool (simulated)');render();toast('Tool connected (simulated).')}
+  else if(a==='skipConnect'){S.skipped=true;log('onboarding_skipped','connect_tool');render();toast('Skipped. You can still reach everything.')}
+  else if(a==='skipQuestions'){S.goal=S.goal||'other';S.way=S.way||'mix';log('onboarding_skipped','personalization questions');toast('Using default answers.');go('checklist')}
+  else if(a==='skipOptional'){
+    if(!S.done.connect)S.skipped=true;
+    log('onboarding_skipped','optional steps from '+S.screen);
+    if(S.screen==='welcome'||S.screen==='personalize'){S.goal=S.goal||'other';S.way=S.way||'mix';S.role=S.role||'Other';go('checklist')}
+    else render();
+    toast('Optional steps skipped. Required steps stay visible.');
+  }
+});
+document.addEventListener('submit',function(ev){
+  var f=ev.target.getAttribute('data-f');if(!f)return;ev.preventDefault();
+  if(f==='signup'){S.name=(document.getElementById('nm').value||'Alex').trim()||'Alex';log('onboarding_started');go('welcome')}
+  else if(f==='welcome'){
+    var r=ev.target.querySelector('input[name=role]:checked');
+    if(!r){document.getElementById('e1').textContent='Please choose a role to continue.';return}
+    S.role=r.value;log('role_selected',S.role);go('personalize');
+  }
+  else if(f==='personalize'){
+    var g=ev.target.querySelector('input[name=goal]:checked'),w=ev.target.querySelector('input[name=way]:checked');
+    if(!g||!w){document.getElementById('e2').textContent='Please pick a goal and a way of working, or skip the questions.';return}
+    S.role=document.getElementById('rl').value;S.goal=g.value;S.way=w.value;
+    log('goal_selected',GOALS[S.goal]+'; way of working: '+WAYS[S.way]);go('checklist');
+  }
+  else if(f==='project'){
+    var v=document.getElementById('pn').value.trim();
+    if(!v){document.getElementById('e3').textContent='Enter a project name.';return}
+    S.projectName=v;S.done.project=true;log('project_created',v);go('task');
+  }
+  else if(f==='task'){
+    var t=document.getElementById('tn').value.trim();
+    if(!t){document.getElementById('e4').textContent='Enter a task title.';return}
+    S.tasks.push(t);S.done.task=true;log('task_created',t);
+    if(S.done.project&&!S.activated){S.activated=true;log('activation_completed')}
+    go('success');
+  }
+});
+// Reload mid-onboarding => resume prompt
+if(S.screen!=='signup'&&S.screen!=='success'&&S.screen!=='resume'&&!S.activated){
+  log('onboarding_abandoned','session ended on '+S.screen);S.screen='resume';save();
+}
+render();
+})();
+</script>
+</body>
+</html>
