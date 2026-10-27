@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MUID-7877 Prototype: Forgot password reset flow</title>
+<style>
+:root{
+  --bg:#f4f5f7;--card:#fff;--text:#1d2330;--muted:#5b6475;--border:#c9cfdb;
+  --primary:#2457d6;--primary-text:#fff;--error:#b3261e;--errbg:#fdecea;
+  --ok:#1b6e3a;--okbg:#e6f4ea;--info:#e8eefc;--focus:#ff9f0a;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#12151c;--card:#1c212c;--text:#eceff5;--muted:#a3adc0;--border:#3a4254;
+    --primary:#7aa2ff;--primary-text:#0d1220;--error:#ffb4ab;--errbg:#3b1f1d;
+    --ok:#8fdba9;--okbg:#17301f;--info:#222b43;--focus:#ffb84d;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+header.top{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;font-size:.8rem;color:var(--muted);border-bottom:1px solid var(--border);background:var(--card)}
+.badge{border:1px solid var(--border);border-radius:99px;padding:2px 10px;font-weight:600;color:var(--text)}
+main{max-width:460px;margin:0 auto;padding:20px 16px 40px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px 20px}
+h1{font-size:1.4rem;margin:0 0 6px}
+h2{font-size:1.05rem;margin:0 0 8px}
+p{margin:0 0 14px}
+.muted{color:var(--muted);font-size:.92rem}
+label{display:block;font-weight:600;margin:14px 0 6px}
+input{width:100%;padding:12px;font-size:1rem;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)}
+input.code{letter-spacing:.4em;text-align:center;font-size:1.4rem;font-variant-numeric:tabular-nums}
+button,.linkbtn{font:inherit;cursor:pointer}
+.btn{width:100%;margin-top:18px;padding:12px;border:0;border-radius:8px;background:var(--primary);color:var(--primary-text);font-weight:700;font-size:1rem}
+.btn.secondary{background:transparent;color:var(--primary);border:1px solid var(--primary)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.linkbtn{background:none;border:0;color:var(--primary);text-decoration:underline;padding:6px 2px;font-size:.95rem}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.msg{padding:10px 12px;border-radius:8px;margin:12px 0;font-size:.93rem}
+.msg.error{background:var(--errbg);color:var(--error)}
+.msg.ok{background:var(--okbg);color:var(--ok)}
+.msg.info{background:var(--info)}
+.field-error{color:var(--error);font-size:.88rem;margin-top:6px;min-height:1.2em}
+.row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;margin-top:12px}
+.hidden{display:none!important}
+.demo{margin-top:20px;border:2px dashed var(--border);border-radius:12px;padding:14px;font-size:.88rem}
+.demo h2{font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.demo code{font-size:1.1rem;font-weight:700;letter-spacing:.2em}
+.demo .mini{padding:6px 10px;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:6px;font-size:.82rem;margin-top:8px}
+.steps{display:flex;gap:6px;margin-bottom:16px}
+.steps span{flex:1;height:5px;border-radius:3px;background:var(--border)}
+.steps span.on{background:var(--primary)}
+section.assume{margin-top:28px;font-size:.88rem;color:var(--muted)}
+section.assume h2{color:var(--text)}
+section.assume li{margin-bottom:5px}
+</style>
+</head>
+<body>
+<header class="top">
+  <span><span class="badge">MUID-7877</span> &nbsp;Prototype</span>
+  <span>Forgot password flow</span>
+</header>
+<main>
+<div class="card">
+
+  <!-- LOGIN -->
+  <div id="s-login" class="screen">
+    <h1>Log in</h1>
+    <p class="muted">Demo account: <strong>demo@example.com</strong> / current password <strong>OldPass123!</strong></p>
+    <div id="login-banner" class="msg ok hidden" role="status"></div>
+    <form id="f-login" novalidate>
+      <label for="l-email">Email</label>
+      <input id="l-email" type="email" autocomplete="username" value="demo@example.com">
+      <label for="l-pass">Password</label>
+      <input id="l-pass" type="password" autocomplete="current-password">
+      <div id="l-err" class="field-error" role="alert"></div>
+      <button class="btn" type="submit">Log in</button>
+    </form>
+    <div class="row"><button class="linkbtn" id="go-forgot" type="button">Forgot password?</button></div>
+  </div>
+
+  <!-- SIGNED IN -->
+  <div id="s-home" class="screen hidden">
+    <h1>You're signed in</h1>
+    <p class="msg ok" role="status">Demo only: login succeeded.</p>
+    <button class="btn secondary" id="logout" type="button">Log out</button>
+  </div>
+
+  <!-- EMAIL -->
+  <div id="s-email" class="screen hidden">
+    <div class="steps" aria-hidden="true"><span class="on"></span><span></span><span></span></div>
+    <h1>Reset your password</h1>
+    <p class="muted">Enter the email for your account and we'll send a 6-digit code.</p>
+    <form id="f-email" novalidate>
+      <label for="e-email">Email</label>
+      <input id="e-email" type="email" autocomplete="email" placeholder="you@example.com">
+      <div id="e-err" class="field-error" role="alert"></div>
+      <button class="btn" type="submit">Send code</button>
+    </form>
+    <div class="row"><button class="linkbtn" data-back type="button">Back to log in</button></div>
+  </div>
+
+  <!-- CODE -->
+  <div id="s-code" class="screen hidden">
+    <div class="steps" aria-hidden="true"><span class="on"></span><span class="on"></span><span></span></div>
+    <h1>Enter your code</h1>
+    <div class="msg info" id="c-confirm" role="status"></div>
+    <form id="f-code" novalidate>
+      <label for="c-code">6-digit code</label>
+      <input id="c-code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="······">
+      <div id="c-err" class="field-error" role="alert"></div>
+      <button class="btn" id="c-submit" type="submit">Verify code</button>
+    </form>
+    <div id="c-locked" class="hidden">
+      <div class="msg error" role="alert">Too many incorrect codes. Request a new code to continue.</div>
+      <button class="btn" id="c-new-locked" type="button">Request a new code</button>
+    </div>
+    <div class="row">
+      <button class="linkbtn" id="c-resend" type="button">Didn't get a code? Request a new one</button>
+      <button class="linkbtn" id="c-change" type="button">Use a different email</button>
+    </div>
+    <div id="c-resent" class="msg ok hidden" role="status"></div>
+  </div>
+
+  <!-- NEW PASSWORD -->
+  <div id="s-pass" class="screen hidden">
+    <div class="steps" aria-hidden="true"><span class="on"></span><span class="on"></span><span class="on"></span></div>
+    <h1>Set a new password</h1>
+    <p class="muted">Use at least 8 characters. It must differ from your old password.</p>
+    <form id="f-pass" novalidate>
+      <label for="p-new">New password</label>
+      <input id="p-new" type="password" autocomplete="new-password">
+      <label for="p-conf">Confirm new password</label>
+      <input id="p-conf" type="password" autocomplete="new-password">
+      <div id="p-err" class="field-error" role="alert"></div>
+      <button class="btn" type="submit">Save password</button>
+    </form>
+  </div>
+
+  <!-- DEMO PANEL -->
+  <aside class="demo" aria-label="Prototype demo controls">
+    <h2>Prototype only: demo inbox</h2>
+    <div id="inbox">No code requested yet. Registered demo email: <strong>demo@example.com</strong>. Any other address acts as unregistered.</div>
+    <button class="mini" id="expire" type="button">Simulate 10 minutes passing (expire code)</button>
+  </aside>
+</div>
+
+<section class="assume">
+  <h2>Assumptions</h2>
+  <ul>
+    <li>No PRD, designs or analytics events were provided, so no analytics are shown. Screens and copy are placeholders.</li>
+    <li>Registered and unregistered emails see the same confirmation message and the same code screen. The demo inbox above is a prototype aid and would not exist in the product.</li>
+    <li>The confirmation message and code entry share one screen.</li>
+    <li>Email check: a basic format check only (invalid format shows an inline error).</li>
+    <li>Codes expire after 10 minutes. Expired codes show an error and prompt a new request.</li>
+    <li>After 3 wrong codes, entry is locked and the user taps "Request a new code". The same option is available any time via "Request a new one", for example when no code arrives.</li>
+    <li>A new code makes the previous code invalid and resets the 3-attempt count. There is no limit on new requests.</li>
+    <li>Unregistered emails never receive a code, so entering any code counts as wrong, following the same 3-attempt rule.</li>
+    <li>Leaving mid-flow (back to log in or using a different email) discards progress. The user must restart from the email step.</li>
+    <li>Password rules: at least 8 characters, must match confirmation, must differ from the old password (demo old password: OldPass123!).</li>
+    <li>After saving, the user returns to log in signed out. Ending other sessions is not shown.</li>
+    <li>Email delivery failures and delays are not simulated.</li>
+    <li>Touch and desktop are both supported, since the platform is not confirmed.</li>
+  </ul>
+</section>
+</main>
+
+<script>
+(function(){
+  var REG='demo@example.com', oldPass='OldPass123!', curPass=oldPass;
+  var st={email:'',registered:false,code:null,fails:0,expired:false,locked:false};
+  var $=function(id){return document.getElementById(id)};
+  var screens=['login','home','email','code','pass'];
+
+  function show(name,focusId){
+    screens.forEach(function(s){$('s-'+s).classList.toggle('hidden',s!==name)});
+    if(focusId)$(focusId).focus();
+  }
+  function validEmail(v){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)}
+  function resetState(){st={email:'',registered:false,code:null,fails:0,expired:false,locked:false};
+    $('inbox').innerHTML='No code requested yet. Registered demo email: <strong>demo@example.com</strong>. Any other address acts as unregistered.';}
+
+  function issueCode(){
+    st.fails=0;st.expired=false;st.locked=false;
+    if(st.registered){
+      st.code=String(Math.floor(100000+Math.random()*900000));
+      $('inbox').innerHTML='Email to <strong>'+st.email+'</strong>: your reset code is <code>'+st.code+'</code> (valid 10 min). Any earlier code no longer works.';
+    }else{
+      st.code=null;
+      $('inbox').innerHTML='<strong>'+st.email+'</strong> is not registered: no email is sent. The user still sees the normal confirmation message.';
+    }
+    $('c-confirm').textContent='If an account exists for '+st.email+', we have sent a 6-digit code. It may take a minute to arrive.';
+    $('c-code').value='';$('c-err').textContent='';
+    $('c-locked').classList.add('hidden');
+    $('f-code').classList.remove('hidden');
+  }
+
+  // login
+  $('f-login').addEventListener('submit',function(e){
+    e.preventDefault();
+    var em=$('l-email').value.trim().toLowerCase(),pw=$('l-pass').value;
+    if(em===REG&&pw===curPass){$('l-err').textContent='';$('login-banner').classList.add('hidden');show('home');}
+    else $('l-err').textContent='Email or password is incorrect.';
+  });
+  $('logout').onclick=function(){$('l-pass').value='';show('login','l-email')};
+  $('go-forgot').onclick=function(){
+    resetState();$('e-err').textContent='';$('e-email').value='';
+    show('email','e-email');
+  };
+  document.querySelectorAll('[data-back]').forEach(function(b){b.onclick=function(){resetState();show('login','l-email')}});
+
+  // email
+  $('f-email').addEventListener('submit',function(e){
+    e.preventDefault();
+    var v=$('e-email').value.trim().toLowerCase();
+    if(!v){$('e-err').textContent='Enter your email address.';return}
+    if(!validEmail(v)){$('e-err').textContent='Enter a valid email address, like you@example.com.';return}
+    $('e-err').textContent='';
+    st.email=v;st.registered=(v===REG);
+    $('c-resent').classList.add('hidden');
+    issueCode();show('code','c-code');
+  });
+
+  // code
+  $('f-code').addEventListener('submit',function(e){
+    e.preventDefault();
+    var v=$('c-code').value.trim();
+    if(!/^\d{6}$/.test(v)){$('c-err').textContent='Enter the 6-digit code.';return}
+    if(st.expired&&st.registered){$('c-err').textContent='This code has expired. Request a new code.';return}
+    if(st.registered&&v===st.code){$('c-err').textContent='';show('pass','p-new');return}
+    st.fails++;
+    if(st.fails>=3){
+      st.locked=true;
+      $('f-code').classList.add('hidden');
+      $('c-locked').classList.remove('hidden');
+      $('c-new-locked').focus();
+    }else{
+      var left=3-st.fails;
+      $('c-err').textContent='That code is incorrect. '+left+(left===1?' attempt':' attempts')+' left.';
+      $('c-code').select();
+    }
+  });
+  function resend(){
+    issueCode();
+    var m=$('c-resent');
+    m.textContent='A new code was requested. If an account exists, it will arrive shortly.';
+    m.classList.remove('hidden');
+    $('c-code').focus();
+  }
+  $('c-resend').onclick=resend;
+  $('c-new-locked').onclick=resend;
+  $('c-change').onclick=function(){resetState();$('e-email').value='';$('e-err').textContent='';show('email','e-email')};
+  $('c-code').addEventListener('input',function(){this.value=this.value.replace(/\D/g,'')});
+
+  $('expire').onclick=function(){
+    if(!st.email){$('inbox').innerHTML='Request a code first.';return}
+    st.expired=true;
+    var note=document.createElement('div');
+    note.textContent='10 minutes passed: the current code is now expired.';
+    $('inbox').appendChild(note);
+  };
+
+  // password
+  $('f-pass').addEventListener('submit',function(e){
+    e.preventDefault();
+    var a=$('p-new').value,b=$('p-conf').value,err=$('p-err');
+    if(a.length<8){err.textContent='Password must be at least 8 characters.';return}
+    if(a===curPass){err.textContent='New password must be different from your old password.';return}
+    if(a!==b){err.textContent='Passwords do not match.';return}
+    curPass=a;err.textContent='';
+    $('p-new').value='';$('p-conf').value='';
+    resetState();
+    $('l-pass').value='';$('l-email').value=REG;
+    var bn=$('login-banner');bn.textContent='Your password was changed. Log in with your new password.';bn.classList.remove('hidden');
+    show('login','l-pass');
+  });
+})();
+</script>
+</body>
+</html>
