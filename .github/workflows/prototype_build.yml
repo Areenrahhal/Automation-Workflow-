@@ -178,8 +178,16 @@ jobs:
           - Responsive from 360px wide, with a visible keyboard focus. Support light and dark mode with prefers-color-scheme.
           - Show the epic key and the word "Prototype" in a small header or footer.
           - Put a descriptive <title> in the head.
+          - Keep the whole file compact, under about 45,000 characters: short CSS, reusable components, data in compact arrays, no repeated markup. A shorter page that is complete is better than a long page that is cut off.
 
           Reply with the HTML document only, starting with <!doctype html>."""
+
+
+          RETRY_NOTE = (
+              "\n\nIMPORTANT: your previous attempt was cut off because it was too long. "
+              "Make this version much more compact, under 30,000 characters: minimal CSS, generate repeated screens with JavaScript, "
+              "and keep every flow and edge case reachable. The page must be finished."
+          )
 
 
           def main():
@@ -271,19 +279,25 @@ jobs:
                   prompt += 'PRD (Confluence page "' + prd_title + '"), background only:\n' + prd_text + "\n\n"
               prompt += TASK
 
-              reply = call(
-                  "POST",
-                  "https://api.anthropic.com/v1/messages",
-                  {
-                      "x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
-                      "anthropic-version": "2023-06-01",
-                      "content-type": "application/json",
-                  },
-                  {"model": model, "max_tokens": 16000, "system": SYSTEM_PROMPT, "messages": [{"role": "user", "content": prompt}]},
-                  timeout=600,
-              )
+              def generate(extra):
+                  return call(
+                      "POST",
+                      "https://api.anthropic.com/v1/messages",
+                      {
+                          "x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
+                          "anthropic-version": "2023-06-01",
+                          "content-type": "application/json",
+                      },
+                      {"model": model, "max_tokens": 20000, "system": SYSTEM_PROMPT, "messages": [{"role": "user", "content": prompt + extra}]},
+                      timeout=900,
+                  )
+
+              reply = generate("")
               if reply.get("stop_reason") == "max_tokens":
-                  die("Claude's answer was cut off before the page was finished. Run the build again.")
+                  print("The first answer was cut off. Trying again with a more compact page.")
+                  reply = generate(RETRY_NOTE)
+              if reply.get("stop_reason") == "max_tokens":
+                  die("Claude's answer was cut off twice before the page was finished. The epic may be too large for one page.")
               page_html = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text").strip()
               page_html = re.sub(r"^```(?:html)?\s*", "", page_html)
               page_html = re.sub(r"\s*```$", "", page_html).strip()
