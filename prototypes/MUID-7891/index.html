@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MUID-7891 Prototype: Rate a completed parking session</title>
+<style>
+:root{
+  --bg:#f3f5f8;--card:#fff;--text:#16202c;--muted:#5b6776;--border:#d3d9e1;
+  --accent:#1d5fd1;--accent-text:#fff;--star:#e8a400;--star-off:#c3cad4;
+  --danger:#b3261e;--danger-bg:#fdecea;--ok:#1b6e3c;--ok-bg:#e6f4ea;--warn-bg:#fff4d6;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#10151c;--card:#1a212b;--text:#e8edf3;--muted:#9aa6b5;--border:#334050;
+    --accent:#6ea2ff;--accent-text:#0b1220;--star:#ffc233;--star-off:#4a5666;
+    --danger:#ff8a80;--danger-bg:#3a1f1d;--ok:#7fd69b;--ok-bg:#16301f;--warn-bg:#3a3014;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text)}
+header.top{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--card);font-size:13px;color:var(--muted)}
+.tag{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:99px;font-weight:600;color:var(--text)}
+main{max-width:480px;margin:0 auto;padding:16px}
+.phone{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;min-height:420px}
+h1{font-size:1.25rem;margin:0 0 4px}
+h2{font-size:1.05rem;margin:20px 0 8px}
+p{margin:6px 0}
+.muted{color:var(--muted);font-size:.9rem}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.btn{display:block;width:100%;padding:12px 16px;border-radius:10px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-text);font-weight:600;margin-top:12px}
+.btn.secondary{background:transparent;color:var(--accent)}
+.btn.link{border-color:transparent;background:transparent;color:var(--muted);text-decoration:underline;font-weight:400}
+.btn:disabled{opacity:.6;cursor:not-allowed}
+.card{border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-top:10px}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.badge{font-size:.75rem;padding:2px 8px;border-radius:99px;border:1px solid var(--border);white-space:nowrap}
+.badge.rated{background:var(--ok-bg);color:var(--ok);border-color:transparent}
+.badge.skipped,.badge.unrated{background:var(--warn-bg)}
+.stars{display:flex;gap:4px;justify-content:center;margin:14px 0 4px}
+.star{background:none;border:0;font-size:2.6rem;line-height:1;padding:2px 4px;color:var(--star-off);border-radius:8px;min-width:48px;min-height:52px}
+.star.on{color:var(--star)}
+.starlabel{text-align:center;min-height:1.4em;font-weight:600}
+label.f{display:block;font-weight:600;margin-top:16px}
+textarea{width:100%;min-height:90px;margin-top:6px;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;resize:vertical}
+.count{text-align:right;font-size:.85rem;color:var(--muted)}
+.count.max{color:var(--danger);font-weight:600}
+.msg{padding:10px 12px;border-radius:10px;margin-top:12px;font-size:.95rem}
+.msg.err{background:var(--danger-bg);color:var(--danger)}
+.msg.info{background:var(--warn-bg)}
+.msg.ok{background:var(--ok-bg);color:var(--ok)}
+.center{text-align:center}
+.big{font-size:3rem}
+.spinner{width:36px;height:36px;border:4px solid var(--border);border-top-color:var(--accent);border-radius:50%;margin:30px auto 10px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+.tools{margin-top:20px;border:1px dashed var(--border);border-radius:12px;padding:12px 14px;font-size:.9rem}
+.tools summary{cursor:pointer;font-weight:600}
+.tools label{display:block;margin-top:10px}
+.tools select{width:100%;padding:8px;margin-top:4px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font:inherit}
+.tools .btn{padding:8px 12px;font-size:.9rem;margin-top:8px}
+ul.assume{padding-left:20px;font-size:.92rem}
+footer{max-width:480px;margin:0 auto;padding:0 16px 32px}
+.sr{position:absolute;left:-9999px}
+</style>
+</head>
+<body>
+<header class="top">
+  <span><span class="tag">MUID-7891</span> Prototype</span>
+  <span>Rate a parking session</span>
+</header>
+<main>
+  <div class="phone" id="phone">
+    <div id="notice" role="status" aria-live="polite"></div>
+    <div id="screen"></div>
+  </div>
+
+  <details class="tools" open>
+    <summary>Prototype controls (not part of the product)</summary>
+    <label>Network behaviour when submitting
+      <select id="netMode">
+        <option value="ok">Submission works</option>
+        <option value="once">Fails the first time, then works</option>
+        <option value="fail">Always fails</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="offline"> Device is offline</label>
+    <button class="btn secondary" id="tEnd3">End 3 sessions back-to-back</button>
+    <button class="btn secondary" id="tLeave">Close the app while the prompt is open</button>
+    <button class="btn secondary" id="tReopen">Try to open the prompt again for the last session</button>
+  </details>
+</main>
+
+<footer>
+  <h2>Assumptions</h2>
+  <p class="muted">The spec leaves these open. These defaults are used so the flow can be clicked through.</p>
+  <ul class="assume">
+    <li>The only user is a person who has just finished a parking session. No sign-in is needed.</li>
+    <li>A star rating is required. Submitting with no stars shows an inline message and nothing is sent. A comment alone cannot be submitted.</li>
+    <li>The comment is limited to 200 characters. The counter shows what is left and typing stops at the limit.</li>
+    <li>Skip is available on the prompt and on the error screen. After skipping, the user goes to the home screen and the session is marked "Skipped". The prompt does not return, and there is no rating from session history.</li>
+    <li>After the thank-you message, "Done" goes to the home screen. Ratings cannot be edited or submitted twice for the same session.</li>
+    <li>Closing the app mid-prompt keeps the draft. The home screen shows a "Resume rating" banner for that session.</li>
+    <li>If submission fails, the stars and comment are kept and "Try again" is shown. After 3 failed attempts, a message says it is still not working, and Skip stays available. There is no other retry limit.</li>
+    <li>Going offline gives the same error screen with an offline message. Retrying works once the connection is back.</li>
+    <li>After several sessions end back-to-back, only the most recent one gets a prompt. The earlier ones are marked "Not rated".</li>
+    <li>"Completed" means any session that has ended. No exclusions are applied.</li>
+    <li>No analytics events are defined, so none are sent. The sample data and the controls above are for demonstration only.</li>
+  </ul>
+</footer>
+
+<script>
+(function(){
+  var MAX=200;
+  var LABELS=['Poor','Fair','Good','Very good','Excellent'];
+  var PLACES=[
+    ['Harbour Street Garage','Tue 14 May, 14:05–16:20','2 h 15 min','$9.00'],
+    ['Station Square Lot B','Wed 15 May, 08:30–17:10','8 h 40 min','$18.50'],
+    ['Riverside Car Park','Thu 16 May, 12:00–12:50','50 min','$2.50'],
+    ['City Library Parking','Fri 17 May, 10:15–11:45','1 h 30 min','$4.00'],
+    ['Market Hall Garage','Sat 18 May, 09:00–13:30','4 h 30 min','$11.25'],
+    ['Airport Short Stay','Sun 19 May, 06:45–09:15','2 h 30 min','$12.00'],
+    ['Old Town Lot C','Mon 20 May, 17:00–18:20','1 h 20 min','$3.50']
+  ];
+  var S={
+    screen:'home',
+    sessions:[
+      {id:1,place:'Museum Quarter Garage',when:'Sun 12 May, 11:00–13:00',dur:'2 h',cost:'$8.00',status:'rated',rating:5,comment:'Easy to find a spot.'},
+      {id:2,place:'North Gate Lot A',when:'Mon 13 May, 09:10–09:40',dur:'30 min',cost:'$1.50',status:'skipped'}
+    ],
+    next:0,nextId:3,
+    promptId:null,draft:{rating:0,comment:''},
+    attempts:0,onceUsed:false,lastError:'',showRatingError:false,
+    sending:false
+  };
+  var $screen=document.getElementById('screen');
+  var $notice=document.getElementById('notice');
+  function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function byId(id){return S.sessions.filter(function(x){return x.id===id})[0]}
+  function notice(t,kind){$notice.innerHTML=t?'<div class="msg '+(kind||'info')+'">'+esc(t)+'</div>':''}
+  function stars(n){var s='';for(var i=1;i<=5;i++)s+=i<=n?'★':'☆';return s}
+
+  function go(screen,focusSel){
+    S.screen=screen;render();
+    var h=$screen.querySelector('h1');
+    if(h){h.setAttribute('tabindex','-1');h.focus({preventScroll:false});}
+  }
+
+  function render(){
+    var f=S['r_'+S.screen];
+    $screen.innerHTML=views[S.screen]();
+    bind();
+  }
+
+  var views={
+    home:function(){
+      var p=PLACES[S.next%PLACES.length];
+      var pending=S.promptId?byId(S.promptId):null;
+      var h='<h1>My parking</h1><p class="muted">Demo user: Alex Morgan</p>';
+      if(pending){
+        h+='<div class="msg info"><strong>Rating not finished</strong><br>'+esc(pending.place)+'<button class="btn" data-act="resume">Resume rating</button></div>';
+      }
+      h+='<h2>Active session</h2><div class="card"><strong>'+esc(p[0])+'</strong><p class="muted">Started today, 09:00 · Plate 7ABC-123</p>'+
+         '<button class="btn" data-act="end"'+(pending?' disabled':'')+'>End parking session</button>'+
+         (pending?'<p class="muted">Finish or skip the open rating first.</p>':'')+'</div>';
+      h+='<h2>Completed sessions</h2>';
+      S.sessions.slice().reverse().forEach(function(x){
+        var label=x.status==='rated'?'Rated '+x.rating+'★':x.status==='skipped'?'Skipped':'Not rated';
+        h+='<div class="card"><div class="row"><strong>'+esc(x.place)+'</strong><span class="badge '+x.status+'">'+label+'</span></div>'+
+           '<div class="muted">'+esc(x.when)+' · '+esc(x.dur)+' · '+esc(x.cost)+'</div></div>';
+      });
+      return h;
+    },
+    prompt:function(){
+      var s=byId(S.promptId),d=S.draft;
+      var h='<h1>How was your parking?</h1><p class="muted">Session ended · '+esc(s.place)+'<br>'+esc(s.when)+' · '+esc(s.dur)+' · '+esc(s.cost)+'</p>';
+      h+='<div class="stars" role="group" aria-label="Star rating, 1 to 5">';
+      for(var i=1;i<=5;i++)h+='<button class="star'+(i<=d.rating?' on':'')+'" data-star="'+i+'" aria-pressed="'+(i===d.rating)+'" aria-label="'+i+(i===1?' star':' stars')+', '+LABELS[i-1]+'">'+(i<=d.rating?'★':'☆')+'</button>';
+      h+='</div><div class="starlabel" id="starLabel">'+(d.rating?LABELS[d.rating-1]:'Tap a star')+'</div>';
+      h+='<div id="ratingErr" aria-live="polite">'+(S.showRatingError&&!d.rating?'<div class="msg err">Choose a star rating to submit.</div>':'')+'</div>';
+      h+='<label class="f" for="comment">Comment <span class="muted">(optional)</span></label>'+
+         '<textarea id="comment" maxlength="'+MAX+'" placeholder="Anything to add about this session?">'+esc(d.comment)+'</textarea>'+
+         '<div class="count" id="count">'+(MAX-d.comment.length)+' characters left</div>'+
+         '<div id="maxMsg" aria-live="polite"></div>';
+      h+='<button class="btn" data-act="submit">Submit rating</button><button class="btn link" data-act="skip">Skip</button>';
+      return h;
+    },
+    sending:function(){
+      return '<div class="center"><div class="spinner" aria-hidden="true"></div><h1>Sending your rating…</h1><p class="muted">Please wait.</p></div>';
+    },
+    error:function(){
+      var d=S.draft;
+      var h='<h1>Rating not sent</h1><div class="msg err" role="alert">'+esc(S.lastError)+'</div>';
+      if(S.attempts>=3)h+='<div class="msg info">This is still not working after '+S.attempts+' tries. You can keep trying, or skip. A skipped rating is not saved.</div>';
+      h+='<div class="card"><div aria-hidden="true" style="color:var(--star);font-size:1.4rem">'+stars(d.rating)+'</div><span class="sr">'+d.rating+' stars</span>'+
+         (d.comment?'<p class="muted">“'+esc(d.comment)+'”</p>':'<p class="muted">No comment</p>')+'</div>';
+      h+='<button class="btn" data-act="retry">Try again</button><button class="btn secondary" data-act="edit">Edit rating</button><button class="btn link" data-act="skip">Skip</button>';
+      return h;
+    },
+    thanks:function(){
+      var s=byId(S.lastDone);
+      return '<div class="center"><div class="big" aria-hidden="true">🎉</div><h1>Thank you for your rating!</h1>'+
+        '<p class="muted">'+esc(s.place)+'</p><div aria-hidden="true" style="color:var(--star);font-size:1.8rem">'+stars(s.rating)+'</div><span class="sr">'+s.rating+' stars</span></div>'+
+        '<button class="btn" data-act="done">Done</button>';
+    }
+  };
+
+  function bind(){
+    $screen.querySelectorAll('[data-star]').forEach(function(b){
+      b.addEventListener('click',function(){
+        S.draft.rating=+b.getAttribute('data-star');
+        S.showRatingError=false;
+        $screen.querySelectorAll('[data-star]').forEach(function(x){
+          var n=+x.getAttribute('data-star');
+          x.classList.toggle('on',n<=S.draft.rating);
+          x.textContent=n<=S.draft.rating?'★':'☆';
+          x.setAttribute('aria-pressed',n===S.draft.rating);
+        });
+        document.getElementById('starLabel').textContent=LABELS[S.draft.rating-1];
+        document.getElementById('ratingErr').innerHTML='';
+      });
+    });
+    var c=document.getElementById('comment');
+    if(c){
+      c.addEventListener('input',function(){
+        S.draft.comment=c.value;
+        var left=MAX-c.value.length;
+        var ct=document.getElementById('count');
+        ct.textContent=left+' characters left';
+        ct.className='count'+(left===0?' max':'');
+        document.getElementById('maxMsg').innerHTML=left===0?'<div class="msg info">Comment limit reached (200 characters). Please keep it short.</div>':'';
+      });
+    }
+    $screen.querySelectorAll('[data-act]').forEach(function(b){
+      b.addEventListener('click',function(){act(b.getAttribute('data-act'))});
+    });
+  }
+
+  function endSessions(n){
+    if(S.promptId){notice('Finish or skip the open rating first.','info');return;}
+    var last=null;
+    for(var i=0;i<n;i++){
+      var p=PLACES[S.next%PLACES.length];S.next++;
+      last={id:S.nextId++,place:p[0],when:p[1],dur:p[2],cost:p[3],status:'unrated'};
+      S.sessions.push(last);
+    }
+    S.promptId=last.id;S.draft={rating:0,comment:''};S.attempts=0;S.onceUsed=false;S.showRatingError=false;
+    notice(n>1?n+' sessions ended. Only the latest one gets a rating prompt; the earlier ones stay "Not rated".':'','info');
+    go('prompt');
+  }
+
+  function submit(){
+    if(S.sending)return;
+    if(!S.draft.rating){
+      S.showRatingError=true;
+      document.getElementById('ratingErr').innerHTML='<div class="msg err">Choose a star rating to submit.</div>';
+      var first=$screen.querySelector('[data-star]');if(first)first.focus();
+      return;
+    }
+    notice('');
+    S.sending=true;go('sending');
+    setTimeout(function(){
+      S.sending=false;
+      var mode=document.getElementById('netMode').value;
+      var offline=document.getElementById('offline').checked;
+      var fail=false;
+      if(offline){fail=true;S.lastError='You appear to be offline. Your rating is saved on this screen. Reconnect and try again.';}
+      else if(mode==='fail'){fail=true;S.lastError='Something went wrong on our side. Your rating has not been sent.';}
+      else if(mode==='once'&&!S.onceUsed){S.onceUsed=true;fail=true;S.lastError='The connection dropped while sending. Your rating has not been sent.';}
+      if(fail){S.attempts++;go('error');return;}
+      var s=byId(S.promptId);
+      if(s.status==='rated'){go('home');return;}
+      s.status='rated';s.rating=S.draft.rating;s.comment=S.draft.comment;
+      S.lastDone=s.id;S.promptId=null;S.draft={rating:0,comment:''};S.attempts=0;
+      go('thanks');
+    },900);
+  }
+
+  function act(a){
+    if(a==='end')endSessions(1);
+    else if(a==='submit'||a==='retry')submit();
+    else if(a==='edit')go('prompt');
+    else if(a==='skip'){
+      var s=byId(S.promptId);s.status='skipped';
+      S.promptId=null;S.draft={rating:0,comment:''};S.attempts=0;
+      notice('Prompt skipped. You will not be asked about this session again.','info');
+      go('home');
+    }
+    else if(a==='done'){notice('');go('home');}
+    else if(a==='resume'){notice('');go('prompt');}
+  }
+
+  document.getElementById('tEnd3').addEventListener('click',function(){endSessions(3)});
+  document.getElementById('tLeave').addEventListener('click',function(){
+    if(!S.promptId||S.sending){notice('No rating prompt is open right now.','info');return;}
+    notice('App closed during the prompt. Your draft was kept.','info');
+    go('home');
+  });
+  document.getElementById('tReopen').addEventListener('click',function(){
+    if(S.promptId){notice('The prompt for the latest session is already open or waiting to be resumed.','info');if(S.screen==='home')render();return;}
+    var s=S.sessions[S.sessions.length-1];
+    var t=s.status==='rated'?'This session is already rated. A rating cannot be changed or sent twice.':
+          s.status==='skipped'?'This session was skipped. The prompt is not shown again.':
+          'Prompts only appear right after a session ends, so this one is not shown.';
+    notice(t,'info');
+    if(S.screen!=='home')go('home');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
