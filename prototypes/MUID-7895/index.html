@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MUID-7895 Prototype – Show Hello World button</title>
+<style>
+:root{--bg:#f6f7fb;--fg:#1b1f2a;--card:#fff;--mut:#5b6475;--ac:#2f5bea;--acfg:#fff;--bd:#d8dce6;--ok:#0b7a43;--okbg:#e4f6ec}
+@media (prefers-color-scheme:dark){:root{--bg:#10131a;--fg:#e8ebf3;--card:#1a1e29;--mut:#9aa3b5;--ac:#7c9bff;--acfg:#0c1020;--bd:#313849;--ok:#6fe0a4;--okbg:#12301f}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column}
+header,footer{padding:10px 16px;font-size:13px;color:var(--mut);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+header{border-bottom:1px solid var(--bd)}
+footer{border-top:1px solid var(--bd);margin-top:auto}
+.tag{background:var(--ac);color:var(--acfg);border-radius:999px;padding:1px 10px;font-weight:600;font-size:12px}
+main{width:100%;max-width:720px;margin:0 auto;padding:20px 16px;display:grid;gap:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:20px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 8px}
+p{margin:0 0 8px}.mut{color:var(--mut);font-size:14px}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--ac);padding:12px 20px;min-height:44px}
+.pri{background:var(--ac);color:var(--acfg);font-weight:600}
+.sec{background:transparent;color:var(--fg);border-color:var(--bd);padding:6px 12px;min-height:36px;font-size:14px}
+button:focus-visible{outline:3px solid var(--fg);outline-offset:3px}
+.stage{text-align:center;padding:28px 12px}
+#msg{margin-top:20px;min-height:56px}
+.hello{display:inline-block;background:var(--okbg);color:var(--ok);border:1px solid var(--ok);border-radius:10px;padding:12px 22px;font-size:24px;font-weight:700;animation:in .08s ease-out}
+@keyframes in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.hello{animation:none}}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+label{font-size:14px;display:inline-flex;gap:6px;align-items:center}
+select{font:inherit;padding:6px;border-radius:6px;border:1px solid var(--bd);background:var(--card);color:var(--fg)}
+select:focus-visible,input:focus-visible{outline:3px solid var(--fg);outline-offset:2px}
+#log{list-style:none;margin:0;padding:0;font:13px/1.6 ui-monospace,Menlo,Consolas,monospace;max-height:180px;overflow:auto}
+#log li{border-bottom:1px dashed var(--bd);padding:2px 0}
+.err{color:#c0392b;font-size:14px}
+ul.a{margin:0;padding-left:20px;font-size:14px;color:var(--mut)}
+.stat{font-size:14px;color:var(--mut)}
+</style>
+</head>
+<body>
+<header><span class="tag">Prototype</span><strong>MUID-7895</strong><span>Test 10 – Automated Prototyping Workflow</span></header>
+<main>
+<section class="card stage" aria-labelledby="t">
+<h1 id="t">Hello World demo</h1>
+<p class="mut">Press the button with mouse, touch, Enter or Space.</p>
+<button id="btn" class="pri" type="button">Show Hello World</button>
+<div id="msg" role="status" aria-live="polite"></div>
+<div class="stat" id="stat">Initial state: no message shown.</div>
+</section>
+
+<section class="card" aria-labelledby="c">
+<h2 id="c">Prototype controls (for QA)</h2>
+<p class="mut">These let you walk through the other flows and edge cases in the spec.</p>
+<div class="row">
+<label for="rep">Repeated click behavior
+<select id="rep"><option value="one">Keep one message</option><option value="replace">Replace message</option><option value="add">Add another</option></select></label>
+<label for="aft">After message
+<select id="aft"><option value="stay">Button stays visible</option><option value="hide">Button hides</option><option value="label">Button label changes</option></select></label>
+</div>
+<div class="row">
+<label><input type="checkbox" id="fail"> Simulate analytics failure</label>
+<label><input type="checkbox" id="hfail"> Simulate click handler failure</label>
+</div>
+<div class="row">
+<button class="sec" id="reset" type="button">Reset to initial state</button>
+<button class="sec" id="reload" type="button">Simulate page reload</button>
+<button class="sec" id="persist" type="button" aria-pressed="false">Persist across reload: off</button>
+</div>
+<p class="err" id="err" role="alert"></p>
+</section>
+
+<section class="card" aria-labelledby="l">
+<h2 id="l">Analytics events</h2>
+<ul id="log" aria-label="Analytics event log"></ul>
+<div class="stat" id="time"></div>
+</section>
+
+<section class="card" aria-labelledby="as">
+<h2 id="as">Assumptions</h2>
+<ul class="a">
+<li>The message appears inline, directly below the button (toast and modal were not chosen).</li>
+<li>Default: the button stays visible with its label unchanged, and repeated clicks keep a single message (no duplicates). The controls above let you try the alternatives.</li>
+<li>The message is announced to screen readers through a polite live region.</li>
+<li>Default: a page reload resets to the initial state; the QA toggle shows the alternative. State is client-side only.</li>
+<li>Reset to initial state is a QA convenience, not a product feature.</li>
+<li>If the handler fails, a visible error is shown; analytics failure never blocks the message.</li>
+<li>Analytics are simulated: all three events are logged on this page, and no network requests are made. English only.</li>
+<li>Browser support was not specified; the page uses standard features and a native button.</li>
+</ul>
+</section>
+</main>
+<footer><span class="tag">Prototype</span><span>MUID-7895 · Draft for approval · No backend</span></footer>
+<script>
+const $=i=>document.getElementById(i);
+const btn=$('btn'),msg=$('msg'),log=$('log');
+let shown=false,clicks=0,persist=false,count=0;
+function track(name){
+  try{
+    if($('fail').checked)throw new Error('analytics unavailable');
+    const li=document.createElement('li');
+    li.textContent=new Date().toLocaleTimeString()+'  '+name;
+    log.prepend(li);
+  }catch(e){
+    const li=document.createElement('li');
+    li.textContent=name+'  (not recorded: '+e.message+')';
+    log.prepend(li);
+  }
+}
+function render(){
+  msg.textContent='';
+  const n=$('rep').value==='add'?count:(shown?1:0);
+  for(let i=0;i<n;i++){
+    const s=document.createElement('div');
+    const sp=document.createElement('span');
+    sp.className='hello';sp.textContent='Hello World!';
+    s.appendChild(sp);s.style.marginTop=i?'8px':'0';
+    msg.appendChild(s);
+  }
+  const a=$('aft').value;
+  btn.hidden=shown&&a==='hide';
+  btn.textContent=shown&&a==='label'?'Hello World shown':'Show Hello World';
+  $('stat').textContent=shown?'Message displayed'+(count>1?' ('+count+' clicks, '+(n)+' shown)':'')+'.':'Initial state: no message shown.';
+}
+btn.addEventListener('click',()=>{
+  const t0=performance.now();
+  $('err').textContent='';
+  track('hello_world_button_clicked');
+  try{
+    if($('hfail').checked)throw new Error('Click handler failed. The message could not be shown.');
+    shown=true;count++;
+    render();
+    track('hello_world_message_displayed');
+    $('time').textContent='Last click to message: '+(performance.now()-t0).toFixed(1)+' ms (target <100 ms)';
+  }catch(e){
+    $('err').textContent=e.message;
+  }
+});
+$('rep').addEventListener('change',()=>{if($('rep').value!=='add')count=Math.min(count,1);render()});
+$('aft').addEventListener('change',render);
+$('reset').addEventListener('click',()=>{shown=false;count=0;$('err').textContent='';$('time').textContent='';render();btn.hidden=false;btn.focus()});
+$('persist').addEventListener('click',e=>{persist=!persist;e.target.setAttribute('aria-pressed',persist);e.target.textContent='Persist across reload: '+(persist?'on':'off')});
+$('reload').addEventListener('click',()=>{
+  log.textContent='';
+  if(!persist){shown=false;count=0}
+  $('err').textContent='';$('time').textContent='';
+  render();
+  track('hello_world_page_viewed');
+});
+render();
+track('hello_world_page_viewed');
+</script>
+</body>
+</html>
