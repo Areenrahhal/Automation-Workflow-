@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MUID-7894 Hello World Button – Prototype</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#1c2230;--card:#fff;--mut:#5b6475;--acc:#2456d6;--accfg:#fff;--bd:#d5d9e2;--ok:#e6f5ea;--okfg:#14602b}
+@media(prefers-color-scheme:dark){:root{--bg:#12151c;--fg:#e8ebf2;--card:#1b202b;--mut:#9aa3b5;--acc:#6e97ff;--accfg:#0d1220;--bd:#333b4d;--ok:#16301f;--okfg:#8fe0a8}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column}
+header,footer{padding:10px 16px;font-size:13px;color:var(--mut);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+header b{color:var(--fg)}
+.tag{border:1px solid var(--bd);border-radius:99px;padding:0 10px}
+main{flex:1;width:100%;max-width:640px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:24px;margin-bottom:16px}
+h1{font-size:1.3rem;margin:0 0 4px}
+p{margin:.3rem 0}
+.mut{color:var(--mut);font-size:14px}
+button{font:inherit;cursor:pointer}
+#go{background:var(--acc);color:var(--accfg);border:0;border-radius:8px;padding:12px 22px;font-weight:600;margin-top:12px}
+#go:hover{filter:brightness(1.08)}
+:focus-visible{outline:3px solid var(--acc);outline-offset:3px}
+#go:focus-visible{outline-color:var(--fg)}
+#msg{margin-top:16px;min-height:3.2rem}
+#msg .m{background:var(--ok);color:var(--okfg);border-radius:8px;padding:12px 16px;font-size:1.4rem;font-weight:700;animation:in .1s ease-out}
+@keyframes in{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){#msg .m{animation:none}}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.sm{background:transparent;color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:6px 12px;font-size:14px}
+h2{font-size:1rem;margin:0 0 8px}
+#log{font:13px/1.6 ui-monospace,monospace;list-style:none;padding:0;margin:0;max-height:180px;overflow:auto}
+#log li{border-bottom:1px solid var(--bd);padding:2px 0}
+#log li span{color:var(--mut)}
+ul.a{padding-left:20px;margin:0}
+ul.a li{margin:4px 0;font-size:14px}
+.stat{display:flex;gap:16px;flex-wrap:wrap;font-size:14px;margin-top:8px}
+</style>
+</head>
+<body>
+<header><span><b>MUID-7894</b> · Hello World Button</span><span class="tag">Prototype</span></header>
+<main>
+<section class="card" aria-labelledby="t">
+<h1 id="t">Hello World Button</h1>
+<p class="mut">Activate the button with mouse, touch, Enter or Space.</p>
+<button id="go" type="button">Show Hello World</button>
+<div id="msg" role="status" aria-live="polite"></div>
+<div class="stat" aria-label="Interaction stats"><span>Clicks: <b id="n">0</b></span><span>Click → message: <b id="ms">–</b></span></div>
+<div class="row"><button class="sm" id="rst" type="button">Reset page state</button></div>
+</section>
+
+<section class="card">
+<h2>Analytics events (simulated, in-page only)</h2>
+<ul id="log" aria-live="off"></ul>
+</section>
+
+<section class="card">
+<h2>Assumptions</h2>
+<ul class="a">
+<li>Single page, one button, one message; English only; no sign-in or backend.</li>
+<li>Message is shown inline below the button, so no dismiss step is needed.</li>
+<li>The button stays visible with the same label after the message appears.</li>
+<li>Repeated clicks keep one message (no duplicates); the message is not toggled or repeated.</li>
+<li>The message lives in client-side state only; a reload returns to the initial state.</li>
+<li>The message is announced to screen readers via a polite live region.</li>
+<li>All three analytics events from the plan are simulated; <code>hello_world_button_clicked</code> fires on every activation, regardless of input method.</li>
+<li>"Reset page state" is a prototype-only helper for repeating the test; it is not part of the product.</li>
+<li>Browser support is not specified; the prototype uses a native &lt;button&gt; for broad support.</li>
+</ul>
+</section>
+</main>
+<footer><span>MUID-7894 · Prototype</span><span>Nothing is saved or sent</span></footer>
+<script>
+const $=id=>document.getElementById(id);
+let shown=false,count=0;
+const log=e=>{const li=document.createElement('li');li.innerHTML='<span>'+new Date().toLocaleTimeString()+'</span> '+e;$('log').prepend(li)};
+function view(){log('hello_world_page_viewed')}
+$('go').addEventListener('click',()=>{
+  const t=performance.now();
+  count++;$('n').textContent=count;
+  log('hello_world_button_clicked');
+  if(!shown){
+    shown=true;
+    const d=document.createElement('div');d.className='m';d.textContent='Hello World!';
+    $('msg').appendChild(d);
+    $('ms').textContent=Math.max(0,(performance.now()-t)).toFixed(1)+' ms';
+    log('hello_world_message_displayed');
+  }else{
+    $('ms').textContent='already shown';
+  }
+});
+$('rst').addEventListener('click',()=>{
+  shown=false;count=0;$('n').textContent=0;$('ms').textContent='–';$('msg').innerHTML='';$('log').innerHTML='';view();$('go').focus();
+});
+view();
+</script>
+</body>
+</html>
