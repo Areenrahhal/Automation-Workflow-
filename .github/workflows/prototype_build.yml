@@ -3,7 +3,7 @@ name: Prototype build
 # Runs when an epic enters Prototyping (journeys approved, or a prototype was rejected).
 # It builds, or revises, a clickable HTML prototype from the approved review comment,
 # publishes it with GitHub Pages, posts the link on the epic, and moves the epic
-# to Prototype Done with the Waiting Approval transition.
+# to Prototype Ready with the "Prototype is Ready / Waiting Approval" transition.
 on:
   repository_dispatch:
     types: [prototype_build]
@@ -38,8 +38,8 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CLAUDE_MODEL: claude-sonnet-5-5
       BUILD_STATUS: Prototyping
-      DONE_TRANSITION: Waiting Approval
-      DONE_STATUS: Prototype Done
+      DONE_TRANSITION: Prototype is Ready / Waiting Approval
+      DONE_STATUS: Prototype Ready
     steps:
       - name: Get the repository
         uses: actions/checkout@v4
@@ -391,8 +391,8 @@ jobs:
               call("POST", base + "/rest/api/2/issue/" + key + "/comment", headers, {"body": body})
               print("Posted the prototype link on " + key + ".")
 
-              done_transition = os.environ.get("DONE_TRANSITION", "Waiting Approval")
-              done_status = os.environ.get("DONE_STATUS", "Prototype Done")
+              done_transition = os.environ.get("DONE_TRANSITION", "Prototype is Ready / Waiting Approval")
+              done_status = os.environ.get("DONE_STATUS", "Prototype Ready")
               transitions = call("GET", base + "/rest/api/3/issue/" + key + "/transitions", headers).get("transitions", [])
               match = [t for t in transitions if t.get("name", "").lower() == done_transition.lower()]
               if not match:
